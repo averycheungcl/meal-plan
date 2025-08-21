@@ -1,4 +1,4 @@
-mport rclpy
+import rclpy
 from rclpy.node import Node
 from my_package.srv import detectIngredients
 from my_package.msg import ingredients

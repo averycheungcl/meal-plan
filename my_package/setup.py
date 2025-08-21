@@ -10,7 +10,11 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/'+ package_name, ['package.xml']),
+        ('share/'+package_name+'/msg',['msg/Ingridients.msg']),
+        ('share/'+package_name+'/msg',['msg/Steps.msg']),
+        ('share/'+ package_name +'/srv',['srv/detectIngredients.srv']),
+        ('share/'+package_name+'/srv',['srv/GenerateRecipe.srv']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -26,6 +30,9 @@ setup(
     #need add entry points i.e the nodes 
     entry_points={
         'console_scripts': [
+            'webcamNode=my_package.webcamNode:main',
+            'planningNode=my_package.planningNode:main',
+            'controlNode=my_package.controlNode:main'            
         ],
     },
 )
