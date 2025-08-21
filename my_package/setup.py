@@ -13,7 +13,7 @@ setup(
         ('share/'+ package_name, ['package.xml']),
         ('share/'+package_name+'/msg',['msg/Ingridients.msg']),
         ('share/'+package_name+'/msg',['msg/Steps.msg']),
-        ('share/'+ package_name +'/srv',['srv/detectIngredients.srv']),
+        ('share/'+ package_name +'/srv',['srv/DetectIngredients.srv']),
         ('share/'+package_name+'/srv',['srv/GenerateRecipe.srv']),
     ],
     install_requires=['setuptools'],
