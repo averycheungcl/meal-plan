@@ -1,11 +1,13 @@
 import rclpy
 from rclpy.node import Node
-from my_package.srv import detectIngredients
-from my_package.msg import ingredients
+from my_package.srv import DetectIngredients
+from my_package.msg import Ingridients
 from ultralytics import YOLO
 import cv2
 import numpy as np
 import json
+
+#need to use sensor.msgs for image maybe 
 
 class webcamNode(Node):
     def __init__(self):

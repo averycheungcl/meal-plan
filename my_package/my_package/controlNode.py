@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
-from my_package.srv import detectIngredients, GenerateRecipe
-from my_package.msg import ingredients, steps
+from my_package.srv import DetectIngredients, GenerateRecipe
+from my_package.msg import Ingridients, Steps
 from geometry_msgs.msg import Pose
 from tf2_ros import TransformListener, Buffer
 import sqlite3

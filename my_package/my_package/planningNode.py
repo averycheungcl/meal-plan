@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from my_package.srv import GenerateRecipe
-from my_package.msg import steps
+from my_package.msg import Steps
 import requests
 import re
 
