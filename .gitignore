@@ -1,0 +1,6 @@
+*.log
+*.json
+*.so
+build/
+install/
+logs/
