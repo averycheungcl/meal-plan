@@ -81,7 +81,7 @@ class webcamNode(Node):
                 detected_data.append(detection)
 
                 # Create Ingredient message
-                ingredient_msg = Ingredient()
+                ingredient_msg = Ingridients()
                 ingredient_msg.name = label
                 ingredient_msg.x_center = float(center_x)
                 ingredient_msg.y_center = float(center_y)
