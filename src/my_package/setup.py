@@ -16,7 +16,7 @@ setup(
          ('share/'+ package_name +'/srv',['srv/DetectIngredients.srv']),
          ('share/'+package_name+'/srv',['srv/GenerateRecipe.srv']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools','ollama',],
     zip_safe=True,
     maintainer='avery',
     maintainer_email='avery@todo.todo',

@@ -1,55 +1,78 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from my_package.srv import GenerateRecipe
 from my_package.msg import Steps
-import requests
+import ollama
 import re
 
 class planningNode(Node):
     def __init__(self):
         super().__init__('meal_planner_node')
         self.srv = self.create_service(GenerateRecipe, 'generate_recipe', self.generate_recipe_callback)
-        self.ollama_url = 'http://localhost:11434/api/generate'
 
     def generate_recipe_callback(self, request, response):
-        ingredients = ', '.join(set(request.ingredient_names))  # Remove duplicates
+        # Keep original line (even though we overwrite it later)
+        ingredients = ', '.join(set(request.ingredients))  # Remove duplicates
+
+        # Hardcoded grocery list (overrides request.ingredients)
+        common_groceries = [
+            "flour", "sugar", "salt", "butter", "milk", "eggs",
+            "rice", "pasta", "tomatoes", "onions", "garlic",
+            "chicken", "beef", "carrots", "potatoes", "cheese"
+        ]
+        ingredients = ', '.join(common_groceries)
+
+        # Build prompt for multiple recipes
         prompt = (
-            f"Generate a simple recipe using only the following ingredients: {ingredients}. "
-            "Provide the recipe name followed by a list of detailed preparation steps. "
-            "Format the response as: 'Recipe: [name]\nSteps:\n1. [step 1]\n2. [step 2]\n...' "
-            "Ensure the recipe is concise and uses only the listed ingredients."
+            f"Generate 3 different recipes using only the following ingredients: {ingredients}. "
+            "For each recipe, provide the recipe name followed by a numbered list of detailed preparation steps. "
+            "Format the response exactly like this:\n\n"
+            "Recipe: [name]\n"
+            "Steps:\n"
+            "1. [step 1]\n"
+            "2. [step 2]\n"
+            "...\n\n"
+            "Recipe: [name]\n"
+            "Steps:\n"
+            "1. [step 1]\n"
+            "2. [step 2]\n"
+            "...\n\n"
+            "Continue until all recipes are listed. Ensure the recipes are concise and use only the listed ingredients."
         )
 
-        # Call Ollama API
+        # Call Ollama locally
         try:
-            api_response = requests.post(
-                self.ollama_url,
-                json={'model': 'llama3', 'prompt': prompt, 'stream': False}
-            )
-            api_response.raise_for_status()
-            recipe_text = api_response.json().get('response', '')
-        except requests.RequestException as e:
-            self.get_logger().error(f'Ollama API call failed: {e}')
+            self.get_logger().info('Calling Ollama locally...')
+            result = ollama.chat(model='llama3.2:1b', messages=[{'role': 'user', 'content': prompt}])
+            recipe_text = result['message']['content']
+            self.get_logger().info('Ollama call complete')
+            self.get_logger().info(f'result :{result}')
+        except Exception as e:
+            self.get_logger().error(f'Ollama local call failed: {e}')
             return response
 
-        # Parse recipe
-        recipe_match = re.search(r'Recipe: (.*?)\nSteps:', recipe_text, re.DOTALL)
-        steps_match = re.findall(r'(\d+)\.\s*(.*?)(?=\n\d+\.|\n|$)', recipe_text, re.DOTALL)
+        # Split the response into separate recipes
+        recipes = re.split(r'\n?Recipe:\s*', recipe_text)
+        for recipe_block in recipes[1:]:  # skip the first empty split
+            # Extract recipe name
+            recipe_name_match = re.match(r'(.*?)\nSteps:', recipe_block, re.DOTALL)
+            steps_match = re.findall(r'(\d+)\.\s*(.*?)(?=\n\d+\.|\n|$)', recipe_block, re.DOTALL)
 
-        if recipe_match and steps_match:
-            recipe_name = recipe_match.group(1).strip()
-            response.recipe = MealSteps()
-            response.recipe.step_numbers = []
-            response.recipe.step_descriptions = []
-            for step_num, step_desc in steps_match:
-                response.recipe.step_numbers.append(int(step_num))
-                response.recipe.step_descriptions.append(step_desc.strip())
-                self.get_logger().info(f'Meal: {recipe_name}, Step {step_num}: {step_desc.strip()}')
-        else:
-            self.get_logger().warn('No valid recipe or steps found in Ollama response')
+            if recipe_name_match and steps_match:
+                recipe_name = recipe_name_match.group(1).strip()
+                response.recipe_name = recipe_name  # assign the name of the last parsed recipe
+                for step_num, step_desc in steps_match:
+                    step_msg = Steps()
+                    step_msg.step_numbers = [int(step_num)]
+                    step_msg.step_descriptions = [step_desc.strip()]
+                    response.steps.append(step_msg)
+                    self.get_logger().info(f'Meal: {recipe_name}, Step {step_num}: {step_desc.strip()}')
+            else:
+                self.get_logger().warning('No valid recipe or steps found in Ollama response')
 
         return response
+
 
 def main(args=None):
     rclpy.init(args=args)
