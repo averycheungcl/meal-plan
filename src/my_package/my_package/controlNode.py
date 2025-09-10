@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+#NEED TO ADD PID 
+
 import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients, GenerateRecipe
@@ -9,13 +12,14 @@ from dataclasses import dataclass
 # Structured ArmStep
 @dataclass #class is mostly for storing data
 class ArmStep:
-    action: str          # 'pick', 'place', 'cut', 'stir'
+    action: str          # 'pick', 'place', 'cut', 'stir' 
     target: str = None   # ingredient name
     tool: str = None     # 'gripper', 'knife', 'spoon'
     pose: Pose = None    # target pose
 
 
 class controlNode(Node):
+    # need to update so that tools are behind robot, ingredients in front and pans are to the left of the robot 
     def __init__(self):
         super().__init__('arm_control_node')
 
