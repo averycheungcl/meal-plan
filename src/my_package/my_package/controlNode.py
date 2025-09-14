@@ -86,7 +86,10 @@ class controlNode(Node):
     # Process Recipe
     # ------------------------------
     def process_recipe(self, recipe, detected_ingredients):
-        for step_num, step_desc in zip(recipe.step_numbers, recipe.step_descriptions):
+    self.get_logger().info(f'Processing recipe: {recipe.recipe_name}')
+    for step_msg in recipe.steps:  # Iterate through each Steps message
+        # Each Steps message contains arrays with one element
+        for step_num, step_desc in zip(step_msg.step_numbers, step_msg.step_descriptions):
             self.get_logger().info(f'Processing Step {step_num}: {step_desc}')
             arm_steps = self.parse_recipe_step(step_desc, detected_ingredients)
             self.execute_arm_steps(arm_steps)
