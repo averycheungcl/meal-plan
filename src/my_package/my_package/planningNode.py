@@ -13,7 +13,8 @@ class planningNode(Node):
 
     def generate_recipe_callback(self, request, response):
         # Keep original line (even though we overwrite it later)
-        ingredients = ', '.join(set(request.ingredients))  # Remove duplicates
+        ingredient_names = [ing.name for ing in request.ingredients]
+        ingredients = ', '.join(ingredient_names) # Remove duplicates
 
         # Hardcoded grocery list (overrides request.ingredients)
         common_groceries = [
@@ -25,7 +26,7 @@ class planningNode(Node):
 
         # Build prompt for multiple recipes
         prompt = (
-            f"Generate 3 different recipes using only the following ingredients: {ingredients}. "
+            f"Generate 2 different recipes using only the following ingredients: {ingredients}. "
             "For each recipe, provide the recipe name followed by a numbered list of detailed preparation steps. "
             "Format the response exactly like this:\n\n"
             "Recipe: [name]\n"

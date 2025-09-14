@@ -16,7 +16,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 # Generate interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/Ingridients.msg"
+  "msg/Ingredients.msg"
   "msg/Steps.msg"
   "srv/DetectIngredients.srv"
   "srv/GenerateRecipe.srv"

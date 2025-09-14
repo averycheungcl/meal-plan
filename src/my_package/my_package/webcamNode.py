@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients
-from my_package.msg import Ingridients
+from my_package.msg import Ingredients
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -81,7 +81,7 @@ class webcamNode(Node):
                 detected_data.append(detection)
 
                 # Create Ingredient message
-                ingredient_msg = Ingridients()
+                ingredient_msg = Ingredients()
                 ingredient_msg.name = label
                 ingredient_msg.x_center = float(center_x)
                 ingredient_msg.y_center = float(center_y)

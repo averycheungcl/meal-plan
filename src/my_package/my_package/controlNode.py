@@ -5,7 +5,7 @@
 import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients, GenerateRecipe
-from my_package.msg import Ingridients, Steps
+from my_package.msg import Ingredients, Steps
 from geometry_msgs.msg import Pose
 from dataclasses import dataclass
 
@@ -67,9 +67,9 @@ class controlNode(Node):
         self.get_logger().info(f'Detected {len(detected_ingredients)} ingredients.')
 
         # Step 2: Generate recipe
-        ingredient_names = [ing.name for ing in detected_ingredients]
+      
         recipe_req = GenerateRecipe.Request()
-        recipe_req.ingredients = ingredient_names
+        recipe_req.ingredients = detected_ingredients
         future = self.recipe_client.call_async(recipe_req)
         rclpy.spin_until_future_complete(self, future)
         if future.result() is None:
