@@ -43,78 +43,91 @@ class webcamNode(Node):
         if not ret:
             self.get_logger().error("Failed to capture image")
             return response
-    
+
         # Run YOLO inference
         results = self.model(frame, imgsz=1280, verbose=False)
-    
+
         for result in results:
             for box in result.boxes:
                 label = result.names[int(box.cls)]
-    
+                # Uncomment to filter only known ingredients
+                # if label not in self.real_widths:
+                #     continue
+
                 # Get bounding box
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 pixel_width = x2 - x1
-    
+
                 # Compute center coordinates (in pixels)
                 center_x = (x1 + x2) / 2
                 center_y = (y1 + y2) / 2
-    
-                # Estimate distance (z in meters)
+
+                # Estimate distance
                 real_width = self.real_widths.get(label, 0.1)  # Default width if unknown
-                z_cam = (real_width * self.fx) / pixel_width if pixel_width > 0 else 0
-    
-                # Convert to camera frame coordinates (meters)
-                x_cam = (center_x - self.cx) * z_cam / self.fx
-                y_cam = (center_y - self.cy) * z_cam / self.fy
-    
+                distance = (real_width * self.focal_length) / pixel_width if pixel_width > 0 else 0
+
+                # Map to grid
+                x_grid = (center_x / frame.shape[1]) * self.fridge_width / self.grid_size
+                y_grid = (center_y / frame.shape[0]) * self.fridge_height / self.grid_size
+                z_grid = distance / self.grid_size
+
                 # Store detection for JSON
                 detection = {
                     'name': label,
-                    'x_cam': float(x_cam),
-                    'y_cam': float(y_cam),
-                    'z_cam': float(z_cam)
+                    'center_x': float(center_x),
+                    'center_y': float(center_y),
+                    'distance': float(distance)
                 }
                 detected_data.append(detection)
-    
+
                 # Create Ingredient message
                 ingredient_msg = Ingredients()
                 ingredient_msg.name = label
                 ingredient_msg.x_center = float(center_x)
                 ingredient_msg.y_center = float(center_y)
-                ingredient_msg.x_cam = float(x_cam)
-                ingredient_msg.y_cam = float(y_cam)
-                ingredient_msg.z_cam = float(z_cam)
+                ingredient_msg.x_grid = float(x_grid)
+                ingredient_msg.y_grid = float(y_grid)
+                ingredient_msg.z_grid = float(z_grid)
+                ingredient_msg.distance = float(distance)
                 response.ingredients.append(ingredient_msg)
-    
+
                 # Draw bounding box
                 cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
                 cv2.circle(frame, (int(center_x), int(center_y)), 5, (0, 0, 255), -1)
-                label_text = f"{label} ({x_cam:.2f}, {y_cam:.2f}, {z_cam:.2f} m)"
+                label_text = f"{label} ({center_x:.1f}, {center_y:.1f})"
+                (text_width, text_height), baseline = cv2.getTextSize(
+                    label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+                )
+                text_bg_top_left = (int(x1), int(y1) - text_height - baseline - 5)
+                text_bg_bottom_right = (int(x1) + text_width, int(y1) - baseline + 5)
+                cv2.rectangle(frame, text_bg_top_left, text_bg_bottom_right, (0, 0, 0), -1)
                 cv2.putText(
-                    frame, label_text, (int(x1), int(y1) - 10),
+                    frame, label_text, (int(x1), int(y1) - baseline - 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2
                 )
-    
+
         # Log detections
         if detected_data:
-            self.get_logger().info("Detected Objects (camera frame in meters):")
+            self.get_logger().info("Detected Objects:")
             for det in detected_data:
                 self.get_logger().info(
-                    f"Name: {det['name']}, Pose: (x={det['x_cam']:.2f}, y={det['y_cam']:.2f}, z={det['z_cam']:.2f})"
+                    f"Name: {det['name']}, Center: ({det['center_x']:.1f}, {det['center_y']:.1f}), Distance: {det['distance']:.2f}m"
                 )
         else:
             self.get_logger().info("No objects detected")
-    
+
         # Save to JSON
         with open(self.output_file, 'w') as f:
             json.dump(detected_data, f, indent=4)
         self.get_logger().info(f"Detections stored in {self.output_file}")
-    
+
         # Display image
         cv2.imshow('Webcam Detection', frame)
-        cv2.waitKey(1)  # don’t block execution
-        return response
+        self.get_logger().info("Press any key to close the image window")
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
+        return response
 
     def destroy_node(self):
         self.cap.release()

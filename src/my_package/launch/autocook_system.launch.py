@@ -118,17 +118,3 @@ def generate_launch_description():
             output='screen'
         ),
     ])
-
-'''
-
-Need add this to  cmakelist
-
-find_package(tf2_ros REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
-
-At bottom: 
-# Install launch files
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}
-)
-'''

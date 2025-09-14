@@ -1,7 +1,8 @@
+#!/usr/bin/env python3 
 import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients
-from my_package.msg import Ingridients
+from my_package.msg import Ingredients
 import cv2
 import sys
 
@@ -9,10 +10,9 @@ import sys
 # e.g. model = YOLO("path/to/best.pt")
 from ultralytics import YOLO  
 
-
-class ImageNode(Node):
+class webcamTest(Node):
     def __init__(self, image_path):
-        super().__init__('image_node')
+        super().__init__('webcam_test_node')
         self.image_path = image_path
         self.cli = self.create_client(DetectIngredients, 'detect_ingredients')
 
@@ -44,7 +44,7 @@ class ImageNode(Node):
                 x_center = float(box.xywh[0][0].cpu().numpy())
                 y_center = float(box.xywh[0][1].cpu().numpy())
 
-                ingredient_msg = Ingridients()
+                ingredient_msg = Ingredients()
                 ingredient_msg.name = label
                 ingredient_msg.x_center = x_center
                 ingredient_msg.y_center = y_center
@@ -71,13 +71,9 @@ class ImageNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-
-    if len(sys.argv) < 2:
-        print("Usage: ros2 run my_package image_node <image_path>")
-        return
-
-    image_path = sys.argv[1]
-    node = ImageNode(image_path)
+    #INSERT PATH TO IMAGE BELOW
+    image_path = '/home/avery/Downloads/food.jpg'
+    node = webcamTest(image_path)
     rclpy.spin(node)
 
 

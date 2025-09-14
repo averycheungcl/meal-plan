@@ -13,6 +13,8 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+
 
 # Generate interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -32,6 +34,7 @@ install(PROGRAMS
   my_package/webcamNode.py
   my_package/planningNode.py
   my_package/controlNode.py
+  my_package/webcamTest.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -39,5 +42,11 @@ install(PROGRAMS
 install(FILES package.xml
   DESTINATION share/${PROJECT_NAME}
 )
+
+
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+'''
 
 ament_package()

@@ -32,7 +32,8 @@ setup(
         'console_scripts': [
             'webcamNode=my_package.webcamNode:main',
             'planningNode=my_package.planningNode:main',
-            'controlNode=my_package.controlNode:main'            
+            'controlNode=my_package.controlNode:main'    
+            'webcamTest=my_package.webcamTest:main'        
         ],
     },
 )
