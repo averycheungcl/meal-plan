@@ -1,41 +1,34 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients
 from my_package.msg import Ingredients
 import cv2
-import sys
+from ultralytics import YOLO
 
-# Assuming you already have a YOLO model loaded in webcamNode
-# e.g. model = YOLO("path/to/best.pt")
-from ultralytics import YOLO  
+class IngredientDetectionServer(Node):
+    def __init__(self):
+        super().__init__('ingredient_detection_server')
 
-class webcamTest(Node):
-    def __init__(self, image_path):
-        super().__init__('webcam_test_node')
-        self.image_path = image_path
-        self.cli = self.create_client(DetectIngredients, 'detect_ingredients')
+        # Create service
+        self.srv = self.create_service(DetectIngredients, 'detect_ingredients', self.detect_callback)
+        self.get_logger().info('DetectIngredients service is ready.')
 
-        while not self.cli.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Waiting for detect_ingredients service...')
+        # Load the YOLO model (update path to your trained weights)
+        self.model = YOLO("yolov8n.pt")  # 🔧 Change this path
 
-        # Load YOLO model (same as in webcamNode)
-        self.model = YOLO("path/to/best.pt")  # 🔧 change path to your weights
+        # Use a predefined image or webcam frame for detection
+        self.image_source = '/home/avery/Downloads/food.jpg'  # 🔧 Change this if needed
 
-        self.send_request()
-
-    def send_request(self):
-        img = cv2.imread(self.image_path)
-
+    def detect_callback(self, request, response):
+        # Read the image
+        img = cv2.imread(self.image_source)
         if img is None:
-            self.get_logger().error(f"Could not read image at {self.image_path}")
-            rclpy.shutdown()
-            return
+            self.get_logger().error(f"Failed to load image from {self.image_source}")
+            return response
 
         # Run YOLO detection
         results = self.model(img)
-
-        req = DetectIngredients.Request()
 
         for r in results:
             for box in r.boxes:
@@ -52,30 +45,18 @@ class webcamTest(Node):
                 ingredient_msg.y_grid = y_center / img.shape[0]
                 ingredient_msg.z_grid = 0.0
                 ingredient_msg.distance = 0.0
-                req.ingredients.append(ingredient_msg)
 
-        future = self.cli.call_async(req)
-        future.add_done_callback(self.callback)
+                response.ingredients.append(ingredient_msg)
 
-    def callback(self, future):
-        try:
-            response = future.result()
-            self.get_logger().info(
-                f"Received ingredients: {[ing.name for ing in response.ingredients]}"
-            )
-        except Exception as e:
-            self.get_logger().error(f'Service call failed: {e}')
-        finally:
-            rclpy.shutdown()
+        self.get_logger().info(f"Detected {len(response.ingredients)} ingredients.")
+        return response
 
 
 def main(args=None):
     rclpy.init(args=args)
-    #INSERT PATH TO IMAGE BELOW
-    image_path = '/home/avery/Downloads/food.jpg'
-    node = webcamTest(image_path)
+    node = IngredientDetectionServer()
     rclpy.spin(node)
-
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
