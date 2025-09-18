@@ -1,1 +1,4 @@
 This was taken from GrabCAD : https://grabcad.com/library/gripper-with-servo-motor-1
+
+
+Changed claw to use MG996R servo assembly and mesh with cadded servo horn i.e Servo no holes 
