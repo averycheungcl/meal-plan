@@ -1,0 +1,5 @@
+string tool_name
+---
+bool success
+string message
+string current_tool

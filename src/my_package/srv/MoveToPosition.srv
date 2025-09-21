@@ -1,0 +1,5 @@
+geometry_msgs/Pose target_pose
+string action_type
+---
+bool success
+string message
