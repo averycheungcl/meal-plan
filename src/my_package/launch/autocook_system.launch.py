@@ -33,7 +33,7 @@ def generate_launch_description():
                 Node(
                     package='my_package',
                     executable='motionControlNode.py',
-                    name='motion_node',
+                    name='motion_control_node',
                     output='screen',
                     parameters=[{
                         'use_sim_time': False,

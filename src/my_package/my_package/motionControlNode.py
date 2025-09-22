@@ -10,7 +10,7 @@ import json
 import serial
 import time
 
-
+# MoveIt2 imports - Official API only
 from moveit.planning import MoveItPy
 from moveit.core.robot_state import RobotState
 from moveit.core.planning_scene import PlanningScene
@@ -66,37 +66,66 @@ class motionControlNode(Node):
         self.get_logger().info('Motion control node initialized and ready')
 
     def setup_moveit2(self):
-        """Initialize MoveIt2 components"""
-        self.get_logger().info('Initializing MoveIt2 components...')
+        """Initialize MoveIt2 components for ROS2 Rolling"""
+        self.get_logger().info('Initializing MoveIt2 components for ROS2 Rolling...')
         
         try:
-            # Initialize MoveItPy (official MoveIt2 Python API)
-            self.moveit = MoveItPy(node='motion_node')
+            # Initialize MoveItPy for ROS2 Rolling
+            self.moveit = MoveItPy(node_name="motion_control_node")
+            
+            # Get robot model and planning scene monitor
             self.robot_model = self.moveit.get_robot_model()
-            #self.planning_scene = self.moveit.get_planning_scene_monitor().get_planning_scene()
+            self.planning_scene_monitor = self.moveit.get_planning_scene_monitor()
             
             # Set up planning groups (adjust based on your robot URDF)
             self.arm_group_name = "arm"  # Change to your arm group name
             self.gripper_group_name = "gripper"  # Change to your gripper group name
             
-            self.get_logger().info(f'MoveItPy initialized with robot: {self.robot_model.getName()}')
-            self.get_logger().info(f'Available joint groups: {self.robot_model.getJointModelGroupNames()}')
+            self.get_logger().info(f'Robot model: {self.robot_model.getName()}')
             
-            # Get planning components
+            # Get available joint model groups
+            available_groups = self.robot_model.getJointModelGroupNames()
+            self.get_logger().info(f'Available joint groups: {available_groups}')
+            
+            # Check if arm group exists
+            if self.arm_group_name not in available_groups:
+                self.get_logger().error(f"Joint group '{self.arm_group_name}' not found!")
+                self.get_logger().error(f"Available groups: {available_groups}")
+                self.get_logger().error("Please update self.arm_group_name to match your robot's URDF")
+                raise ValueError(f"Joint group '{self.arm_group_name}' not found. Available: {available_groups}")
+            
+            # Get joint model group for arm
             self.arm_group = self.robot_model.getJointModelGroup(self.arm_group_name)
-            if not self.arm_group:
-                raise ValueError(f"Joint group '{self.arm_group_name}' not found")
+            self.get_logger().info(f'Arm group "{self.arm_group_name}" loaded successfully')
             
-            try:
+            # Check for gripper group
+            if self.gripper_group_name in available_groups:
                 self.gripper_group = self.robot_model.getJointModelGroup(self.gripper_group_name)
-                self.get_logger().info('Gripper group found')
-            except:
+                self.get_logger().info(f'Gripper group "{self.gripper_group_name}" found')
+            else:
                 self.gripper_group = None
-                self.get_logger().warn('Gripper group not found - using manual control')
+                self.get_logger().warn(f'Gripper group "{self.gripper_group_name}" not found - using manual control')
+            
+            # Get planning component for the arm group
+            self.planning_component = self.moveit.get_planning_component(self.arm_group_name)
+            self.get_logger().info(f'Planning component created for group: {self.arm_group_name}')
             
             # Set planning parameters
             self.planning_time = 10.0
             self.velocity_scaling = 0.5
+            self.acceleration_scaling = 0.5
+            
+            self.get_logger().info('MoveIt2 initialization completed successfully')
+            
+            # Move to home position on startup
+            self.move_to_home_position()
+            
+        except Exception as e:
+            self.get_logger().error(f'MoveIt2 initialization failed: {e}')
+            self.get_logger().error('Troubleshooting steps:')
+            self.get_logger().error('1. Make sure your robot description is loaded: ros2 param get /robot_description robot_description')
+            self.get_logger().error('2. Check MoveIt2 is running: ros2 node list | grep move_group')
+            self.get_logger().error('3. Verify your planning groups in SRDF match the arm_group_name')
             self.acceleration_scaling = 0.5
             
             # Move to home position on startup
@@ -124,7 +153,7 @@ class motionControlNode(Node):
             success = self.execute_motion_to_pose(pose, action_type)
             
             response.success = success
-            response.message = "Motion completed successfully" if success else "Motion failed"
+            response.message = "Motion completed successfully" if success else "Moti on failed"
             
             return response
             
@@ -177,28 +206,29 @@ class motionControlNode(Node):
             return response
 
     def execute_motion_to_pose(self, pose, action_type="move"):
-        """Execute motion using MoveIt2"""
+        """Execute motion using MoveIt2 for ROS2 Rolling"""
         try:
             self.is_moving = True
             self.publish_status(f"Planning motion to ({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})")
             
-            # Create planning component
-            planning_component = self.moveit.get_planning_component(self.arm_group_name)
+            # Set start state to current state
+            self.planning_component.setStartStateToCurrentState()
             
-            # Set goal pose
-            planning_component.setGoal(pose, "end_effector_link")  # Adjust end effector link name
+            # Set goal pose (adjust end_effector_link based on your robot)
+            self.planning_component.setGoal(pose, "end_effector_link")
             
             # Plan motion
-            plan_result = planning_component.plan()
+            plan_solution = self.planning_component.plan()
             
-            if plan_result:
-                # Execute the plan
-                robot_trajectory = plan_result.trajectory
-                self.publish_status('Executing planned motion')
+            # Check if planning was successful
+            if plan_solution:
+                self.publish_status('Motion planning successful, executing...')
                 
-                # Get joint values from trajectory (final point)
-                joint_values = []
+                # Execute the planned trajectory
+                robot_trajectory = plan_solution.trajectory
+                
                 if robot_trajectory and len(robot_trajectory.joint_trajectory.points) > 0:
+                    # Get joint values from trajectory (final point)
                     final_point = robot_trajectory.joint_trajectory.points[-1]
                     joint_values = list(final_point.positions)
                     
@@ -211,7 +241,7 @@ class motionControlNode(Node):
                         self.is_moving = False
                         return True
                     else:
-                        self.get_logger().warn('ESP32 communication failed but MoveIt motion completed')
+                        self.get_logger().warn('ESP32 communication failed but planning succeeded')
                         self.is_moving = False
                         return True  # Still success from MoveIt perspective
                 else:
