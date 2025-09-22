@@ -1,11 +1,26 @@
 # launch/autocook_system.launch.py
+
+import os 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import ExecuteProcess, TimerAction
+from launch.substitutions import Command
 
 def generate_launch_description():
+    urdf_file=os.path.join(get_package_share_directory('robot_description'),'urdf','autocook_robot.urdf.xacro')
+    robot_description=Command(['xacro',urdf_file])
+
+
     return LaunchDescription([
         # Launch webcam detection service
+        Node(
+            package='robot_state_publisher',
+            exectuable = 'robot_state_publisher',
+            name='robot_state_publisher',
+            output='screen',
+            parameters=[{'robot_description':robot_description}],
+        ),
         Node(
             package='my_package',
             executable='webcamNode.py',
@@ -65,7 +80,7 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='world_to_base_tf',
             arguments=['0', '0', '0', '0', '0', '0', 'world', 'base_link'],
-            output='screen'
+            output='log'
         ),
     ])
 

@@ -71,7 +71,7 @@ class motionControlNode(Node):
         
         try:
             # Initialize MoveItPy for ROS2 Rolling
-            self.moveit = MoveItPy(node_name="motion_control_node")
+            self.moveit = MoveItPy(node_name="motion_control_moveit")
             
             # Get robot model and planning scene monitor
             self.robot_model = self.moveit.get_robot_model()
@@ -126,10 +126,6 @@ class motionControlNode(Node):
             self.get_logger().error('1. Make sure your robot description is loaded: ros2 param get /robot_description robot_description')
             self.get_logger().error('2. Check MoveIt2 is running: ros2 node list | grep move_group')
             self.get_logger().error('3. Verify your planning groups in SRDF match the arm_group_name')
-<<<<<<< HEAD
-=======
-            raise5
->>>>>>> dc09cff298bdec3d04c903a011081464f230017d
             self.acceleration_scaling = 0.5
             
             # Move to home position on startup
