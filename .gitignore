@@ -4,4 +4,7 @@
 build/
 install/
 log/
+
+log/COLCON_IGNORE
+log/latest
 log/latest_build
