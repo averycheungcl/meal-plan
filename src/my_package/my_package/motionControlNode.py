@@ -71,9 +71,9 @@ class motionControlNode(Node):
         
         try:
             # Initialize MoveItPy (official MoveIt2 Python API)
-            self.moveit = MoveItPy(node=self)
+            self.moveit = MoveItPy(node='motion_node')
             self.robot_model = self.moveit.get_robot_model()
-            self.planning_scene = self.moveit.get_planning_scene_monitor().get_planning_scene()
+            #self.planning_scene = self.moveit.get_planning_scene_monitor().get_planning_scene()
             
             # Set up planning groups (adjust based on your robot URDF)
             self.arm_group_name = "arm"  # Change to your arm group name

@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import json
 
-#need to use sensor.msgs for image maybe 
+
 
 class webcamNode(Node):
     def __init__(self):
@@ -24,6 +24,7 @@ class webcamNode(Node):
 
         # Initialize webcam
         self.cap = cv2.VideoCapture(0)
+        
         if not self.cap.isOpened():
             self.get_logger().error("Failed to open webcam")
             rclpy.shutdown()

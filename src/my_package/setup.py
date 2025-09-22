@@ -15,8 +15,12 @@ setup(
          ('share/'+package_name+'/msg',['msg/Steps.msg']),
          ('share/'+ package_name +'/srv',['srv/DetectIngredients.srv']),
          ('share/'+package_name+'/srv',['srv/GenerateRecipe.srv']),
+         ('share/'+package_name+'/srv',['srv/MoveToPosition.srv']),
+         ('share/'+package_name+'/srv',['srv/ExecuteGrip.srv']),
+         ('share/'+package_name+'/srv',['srv/SetTool.srv']),
+         ('share/'+package_name+'/launch',['launch/autocook_system.launch.py']),
     ],
-    install_requires=['setuptools','ollama',],
+    install_requires=['setuptools','ollama','pyserial','numpy'],
     zip_safe=True,
     maintainer='avery',
     maintainer_email='avery@todo.todo',
@@ -31,9 +35,10 @@ setup(
     entry_points={
         'console_scripts': [
             'webcamNode=my_package.webcamNode:main',
-            'planningNode=my_package.planningNode:main',
+            'planningNode=my_package.planningNode:main',                                                                                                                        
             'controlNode=my_package.controlNode:main',    
-            'webcamTest=my_package.webcamTest:main'        
+            'webcamTest=my_package.webcamTest:main'    
+            'motionControlNode=my_package.motionControlNode:main'    
         ],
     },
 )

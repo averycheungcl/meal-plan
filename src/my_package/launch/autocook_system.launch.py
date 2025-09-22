@@ -8,7 +8,7 @@ def generate_launch_description():
         # Launch webcam detection service
         Node(
             package='my_package',
-            executable='webcamNode',
+            executable='webcamNode.py',
             name='webcam_node',
             output='screen',
             parameters=[{
@@ -19,21 +19,37 @@ def generate_launch_description():
         # Launch recipe planning service
         Node(
             package='my_package',
-            executable='planningNode',
+            executable='planningNode.py',
             name='planning_node',
             output='screen',
             parameters=[{
                 'use_sim_time': False,
             }]
         ),
-        
         # Delay control node to ensure services are ready
         TimerAction(
-            period=3.0,
+            period=2.0,
             actions=[
                 Node(
                     package='my_package',
-                    executable='controlNode',
+                    executable='motionControlNode.py',
+                    name='motion_node',
+                    output='screen',
+                    parameters=[{
+                        'use_sim_time': False,
+                    }]
+                )
+            ]
+        ),
+        
+        
+        # Delay control node to ensure services are ready
+        TimerAction(
+            period=5.0,
+            actions=[
+                Node(
+                    package='my_package',
+                    executable='controlNode.py',
                     name='control_node',
                     output='screen',
                     parameters=[{
@@ -53,68 +69,3 @@ def generate_launch_description():
         ),
     ])
 
-
-# launch/individual_nodes.launch.py
-from launch import LaunchDescription
-from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration
-from launch.actions import DeclareLaunchArgument
-
-def generate_launch_description():
-    return LaunchDescription([
-        # Declare arguments
-        DeclareLaunchArgument(
-            'node_name',
-            default_value='webcamNode',
-            description='Name of the node to launch'
-        ),
-        
-        # Launch single node based on argument
-        Node(
-            package='my_package',
-            executable=LaunchConfiguration('node_name'),
-            name=LaunchConfiguration('node_name'),
-            output='screen',
-        ),
-    ])
-
-
-# launch/debug_system.launch.py
-from launch import LaunchDescription
-from launch_ros.actions import Node
-
-def generate_launch_description():
-    return LaunchDescription([
-        # Launch all nodes with debug output
-        Node(
-            package='my_package',
-            executable='webcamNode',
-            name='webcam_node',
-            output='screen',
-            arguments=['--ros-args', '--log-level', 'DEBUG']
-        ),
-        
-        Node(
-            package='my_package',
-            executable='planningNode',
-            name='planning_node',
-            output='screen',
-            arguments=['--ros-args', '--log-level', 'DEBUG']
-        ),
-        
-        Node(
-            package='my_package',
-            executable='controlNode',
-            name='control_node',
-            output='screen',
-            arguments=['--ros-args', '--log-level', 'DEBUG']
-        ),
-        
-        # RQT graph for visualization
-        Node(
-            package='rqt_graph',
-            executable='rqt_graph',
-            name='rqt_graph',
-            output='screen'
-        ),
-    ])

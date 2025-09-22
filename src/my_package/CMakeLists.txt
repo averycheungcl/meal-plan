@@ -11,10 +11,15 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
+find_package(moveit_core REQUIRED)
+find_package(moveit_ros_planning REQUIRED)
+find_package(moveit_ros_planning_interface REQUIRED)
+find_package(moveit_py REQUIRED)
 
 # Generate interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -22,7 +27,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Steps.msg"
   "srv/DetectIngredients.srv"
   "srv/GenerateRecipe.srv"
-  DEPENDENCIES std_msgs geometry_msgs
+  "srv/MoveToPosition.srv"
+  "srv/ExecuteGrip.srv"
+  "srv/SetTool.srv"
+  DEPENDENCIES std_msgs geometry_msgs sensor_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
@@ -32,6 +40,7 @@ ament_export_dependencies(rosidl_default_runtime)
 # Install Python executables
 install(PROGRAMS
   my_package/webcamNode.py
+  my_package/motionControlNode.py
   my_package/planningNode.py
   my_package/controlNode.py
   my_package/webcamTest.py
