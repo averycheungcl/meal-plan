@@ -1,24 +1,31 @@
-import RPi.GPIO as GPIO
+import lgpio
 import time
 
-servo_pin = 18
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(servo_pin, GPIO.OUT)
+# Open the GPIO chip
+h = lgpio.gpiochip_open(0)
 
-pwm = GPIO.PWM(servo_pin, 50)  # 50 Hz (20 ms period)
-pwm.start(0)
+servo_pin = 12
 
-def set_angle(angle):
-    duty = 2 + (angle / 18)   # maps 0–180° to 2–12% duty
-    GPIO.output(servo_pin, True)
-    pwm.ChangeDutyCycle(duty)
-    time.sleep(0.5)
-    GPIO.output(servo_pin, False)
-    pwm.ChangeDutyCycle(0)
+# Set up PWM at 50 Hz
+lgpio.tx_pwm(h, servo_pin, 50, 7.5)  # 7.5% duty = ~1.5 ms pulse (center)
 
-set_angle(0)
-set_angle(90)
-set_angle(180)
+time.sleep(2)
 
-pwm.stop()
-GPIO.cleanup()
+# Move to 0 degrees (~1 ms pulse, 5% duty)
+lgpio.tx_pwm(h, servo_pin, 50, 5.0)
+time.sleep(2)
+
+# Move to 180 degrees (~2 ms pulse, 10% duty)
+lgpio.tx_pwm(h, servo_pin, 50, 10.0)
+time.sleep(2)
+
+# Back to center
+lgpio.tx_pwm(h, servo_pin, 50, 7.5)
+time.sleep(2)
+
+# Stop PWM output
+lgpio.tx_pwm(h, servo_pin, 0, 0)
+
+# Close GPIO chip
+lgpio.gpiochip_close(h)
+
