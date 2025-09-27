@@ -1,0 +1,1 @@
+Contains files of new sldprts which have origin defined for solidworks urdf exporting
