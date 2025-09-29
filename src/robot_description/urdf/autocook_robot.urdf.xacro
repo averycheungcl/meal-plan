@@ -1,0 +1,192 @@
+<?xml version="1.0"?>
+<robot name="autocook_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- X is out of page, Y is right, Z is up-->
+
+  <!-- Properties for easy modification -->
+  <xacro:property name="joint_effort" value="100.0" />
+  <xacro:property name="joint_velocity" value="2.0" />
+  <xacro:property name="joint_damping" value="0.1" />
+  <xacro:property name="joint_friction" value="0.1" />
+  <xacro:property name="joint_lower_limit" value="-3.14159" />
+  <xacro:property name="joint_upper_limit" value="3.14159" />
+
+  <!-- Material definitions -->
+  <material name="light_grey">
+    <color rgba="0.75294 0.75294 0.75294 1" />
+  </material>
+  
+  <material name="orange">
+    <color rgba="0.619607843137255 0.407843137254902 0.2 1" />
+  </material>
+
+  <!-- Macro for revolute joints -->
+  <xacro:macro name="revolute_joint" params="name parent child origin_xyz origin_rpy axis_xyz lower:=${joint_lower_limit} upper:=${joint_upper_limit}">
+    <joint name="${name}" type="revolute">
+      <origin xyz="${origin_xyz}" rpy="${origin_rpy}" />
+      <parent link="${parent}" />
+      <child link="${child}" />
+      <axis xyz="${axis_xyz}" />
+      <limit lower="${lower}" upper="${upper}" effort="${joint_effort}" velocity="${joint_velocity}" />
+      <dynamics damping="${joint_damping}" friction="${joint_friction}" />
+    </joint>
+  </xacro:macro>
+
+  <!-- Macro for links with mesh -->
+  <xacro:macro name="robot_link" params="name mesh_file material_name mass com_xyz inertia_ixx inertia_ixy inertia_ixz inertia_iyy inertia_iyz inertia_izz">
+    <link name="${name}">
+      <inertial>
+        <origin xyz="${com_xyz}" rpy="0 0 0" />
+        <mass value="${mass}" />
+        <inertia
+          ixx="${inertia_ixx}"
+          ixy="${inertia_ixy}"
+          ixz="${inertia_ixz}"
+          iyy="${inertia_iyy}"
+          iyz="${inertia_iyz}"
+          izz="${inertia_izz}" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://robot_description/meshes/${mesh_file}" />
+          </geometry>
+          <material name="${material_name}" />
+        </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://robot_description/meshes/${mesh_file}" />
+        </geometry>
+      </collision>
+    </link>
+  </xacro:macro>
+
+  <!-- Base Link -->
+  <xacro:robot_link
+    name="base_link"
+    mesh_file="base_link.STL"
+    material_name="light_grey"
+    mass="0.39092"
+    com_xyz="0.76597 0.066589 1.0726"
+    inertia_ixx="0.00071222"
+    inertia_ixy="-1.0773E-06"
+    inertia_ixz="1.287E-08"
+    inertia_iyy="0.0011902"
+    inertia_iyz="-2.0447E-05"
+    inertia_izz="0.00065883" />
+
+  <!-- Link 1 -->
+  <xacro:robot_link
+    name="link1"
+    mesh_file="link1.STL"
+    material_name="light_grey"
+    mass="0.361069261236576"
+    com_xyz="-0.10650784925907 0.00417486674041756 -0.0145368089792132"
+    inertia_ixx="0.000215822501095626"
+    inertia_ixy="-1.22775369052024E-05"
+    inertia_ixz="-0.000335922935215592"
+    inertia_iyy="0.00161030108481838"
+    inertia_iyz="-3.02363275740366E-07"
+    inertia_izz="0.0014504987879813" />
+
+  <!-- Joint 1 -->
+  <xacro:revolute_joint
+    name="j1"
+    parent="base_link"
+    child="link1"
+    origin_xyz="0.76625 -1.0717 0.098796"
+    origin_rpy="-1.875 1.5323 -1.5122"
+    axis_xyz="1 0 0" />
+
+  <!-- Link 2 -->
+  <xacro:robot_link
+    name="link2"
+    mesh_file="link2.STL"
+    material_name="light_grey"
+    mass="0.212986950525892"
+    com_xyz="0.0560935708288552 -0.00189735849236827 -9.92259764819592E-05"
+    inertia_ixx="7.76584563832673E-05"
+    inertia_ixy="7.232876204405E-05"
+    inertia_ixz="1.430518499155E-05"
+    inertia_iyy="0.000735988737627481"
+    inertia_iyz="-2.25598880777586E-06"
+    inertia_izz="0.000721079677170879" />
+
+  <!-- Joint 2 -->
+  <xacro:revolute_joint
+    name="j2"
+    parent="link1"
+    child="link2"
+    origin_xyz="-0.22734 -0.019963 -0.033894"
+    origin_rpy="-3.1416 1.32 0"
+    axis_xyz="0 0 1" />
+
+  <!-- Link 3 -->
+  <xacro:robot_link
+    name="link3"
+    mesh_file="link3.STL"
+    material_name="light_grey"
+    mass="0.120516367793329"
+    com_xyz="-0.00104811911320768 0.0205885350749783 0.00115300831140863"
+    inertia_ixx="8.35571045217527E-05"
+    inertia_ixy="2.50065494779572E-06"
+    inertia_ixz="-6.78028285597788E-08"
+    inertia_iyy="8.38836484366433E-05"
+    inertia_iyz="5.65009200857877E-09"
+    inertia_izz="0.000123830818507836" />
+
+  <!-- Joint 3 -->
+  <xacro:revolute_joint
+    name="j3"
+    parent="link2"
+    child="link3"
+    origin_xyz="0.17293 -0.022596 -0.0052474"
+    origin_rpy="-3.0862 0 1.5708"
+    axis_xyz="0 0 1" />
+
+  <!-- Link 4 -->
+  <xacro:robot_link
+    name="link4"
+    mesh_file="link4.STL"
+    material_name="light_grey"
+    mass="0.175494701815449"
+    com_xyz="-0.00369326123625052 0.00866771060956695 -0.00835245119104788"
+    inertia_ixx="9.39238961808861E-05"
+    inertia_ixy="6.53777694658389E-08"
+    inertia_ixz="-1.13775136464149E-05"
+    inertia_iyy="0.000147797084236063"
+    inertia_iyz="-7.73187082079218E-08"
+    inertia_izz="7.45900436256252E-05" />
+
+  <!-- Joint 4 -->
+  <xacro:revolute_joint
+    name="j4"
+    parent="link3"
+    child="link4"
+    origin_xyz="0.0071183 0.051786 -1.7208E-05"
+    origin_rpy="-3.1394 0 -1.5708"
+    axis_xyz="0 0 1" />
+
+  <!-- End Effector -->
+  <xacro:robot_link
+    name="ee"
+    mesh_file="ee.STL"
+    material_name="orange"
+    mass="0.0803261520158799"
+    com_xyz="0.00211061106313259 -0.0097113678126215 0.016264534237393"
+    inertia_ixx="1.34162715812669E-05"
+    inertia_ixy="-1.14144671680823E-06"
+    inertia_ixz="-5.32860594326238E-07"
+    inertia_iyy="1.18190672744296E-05"
+    inertia_iyz="2.86450010205808E-07"
+    inertia_izz="1.60623127255171E-05" />
+
+  <!-- End Effector Joint (Fixed) -->
+  <joint name="eeJoint" type="fixed">
+    <origin xyz="-0.027302 0.02075 -0.072469" rpy="2.6544 0.76937 2.5025" />
+    <parent link="link4" />
+    <child link="ee" />
+  </joint>
+
+</robot>
