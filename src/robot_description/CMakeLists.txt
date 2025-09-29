@@ -1,14 +1,17 @@
-cmake_minimum_required(VERSION 2.8.3)
-
+cmake_minimum_required(VERSION 3.8)
 project(robot_description)
 
-find_package(catkin REQUIRED)
 
-catkin_package()
 
-find_package(roslaunch)
+# Find dependencies
+find_package(ament_cmake REQUIRED)
 
+# Install directories
 foreach(dir config launch meshes urdf)
-	install(DIRECTORY ${dir}/
-		DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/${dir})
+  install(DIRECTORY ${dir}/
+    DESTINATION share/${PROJECT_NAME}/${dir})
 endforeach(dir)
+
+
+
+ament_package()
