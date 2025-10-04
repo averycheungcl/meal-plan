@@ -304,6 +304,8 @@ class controlNode(Node):
 
     def get_ingredient_pose(self, ing_msg):
         """  FIXED: Convert ingredient coordinates from camera frame to base_link frame using TF2"""
+
+        #need to determine position and orientation of cam for finaalise
         try:
             # Create pose in camera_link frame using PROPER pinhole camera model
             camera_pose = PoseStamped()

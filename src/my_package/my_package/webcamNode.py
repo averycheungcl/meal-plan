@@ -18,8 +18,10 @@ class webcamNode(Node):
         if not self.cap.isOpened():
             self.get_logger().error("Failed to open webcam - node will continue without camera")
             self.cap = None
-            # DON'T call rclpy.shutdown() here!
+    
             return
+        self.confidence_threshold = 0.5
+        self.min_pixel_size = 30
 
         # Set webcam resolution
         self.image_width = 1280
@@ -170,6 +172,7 @@ class webcamNode(Node):
             self.cap.release()
         cv2.destroyAllWindows()
         super().destroy_node()
+    
 
 
 def main(args=None):

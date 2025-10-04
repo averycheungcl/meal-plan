@@ -12,7 +12,6 @@ import time
 
 # MoveIt2 imports
 from moveit.planning import MoveItPy
-from moveit.core.robot_state import RobotState
 
 # Custom service imports
 from my_package.srv import MoveToPosition, ExecuteGrip, SetTool
@@ -346,3 +345,210 @@ class motionControlNode(Node):
         # All retries failed
         self.get_logger().error(f'ESP32 communication failed after {self.esp32_max_retries} attempts')
         return False
+    def execute_gripper_action(self, action):
+        """Execute gripper open/close"""
+        if not self.esp32_serial:
+            self.get_logger().warn('ESP32 not connected, simulating gripper action')
+            return True
+        
+        try:
+            command = {
+                'action': 'gripper',
+                'state': action,  # 'open' or 'close'
+                'timestamp': time.time()
+            }
+            
+            json_command = json.dumps(command) + '\n'
+            self.esp32_serial.write(json_command.encode())
+            self.esp32_serial.flush()
+            
+            # Wait for acknowledgment
+            self.esp32_serial.timeout = 2.0
+            response = self.esp32_serial.readline().decode().strip()
+            
+            if response == "OK":
+                self.get_logger().info(f'Gripper {action} completed')
+                return True
+            else:
+                self.get_logger().warn(f'Gripper {action} failed: {response}')
+                return False
+                
+        except Exception as e:
+            self.get_logger().error(f'Gripper command failed: {e}')
+            return False
+
+    def pickup_tool(self, tool_name):
+        """Navigate to tool location and attach it"""
+        if tool_name not in self.tool_positions:
+            self.get_logger().error(f'Unknown tool: {tool_name}')
+            return False
+        
+        self.publish_status(f'Picking up {tool_name}')
+        
+        # Get tool position
+        tool_pos = self.tool_positions[tool_name]
+        
+        # Create approach pose (10cm above tool)
+        approach_pose = Pose()
+        approach_pose.position.x = tool_pos['x']
+        approach_pose.position.y = tool_pos['y']
+        approach_pose.position.z = tool_pos['z'] + 0.1
+        approach_pose.orientation.w = 1.0
+        
+        # Move to approach position
+        if not self.execute_motion_to_pose(approach_pose, "approach_tool"):
+            return False
+        
+        # Open gripper
+        if not self.execute_gripper_action('open'):
+            return False
+        
+        # Move down to tool
+        tool_pose = Pose()
+        tool_pose.position.x = tool_pos['x']
+        tool_pose.position.y = tool_pos['y']
+        tool_pose.position.z = tool_pos['z']
+        tool_pose.orientation.w = 1.0
+        
+        if not self.execute_motion_to_pose(tool_pose, "grasp_tool"):
+            return False
+        
+        # Close gripper to grasp tool
+        if not self.execute_gripper_action('close'):
+            return False
+        
+        # Lift tool
+        if not self.execute_motion_to_pose(approach_pose, "lift_tool"):
+            return False
+        
+        self.current_tool = tool_name
+        self.publish_status(f'{tool_name} attached')
+        return True
+
+    def return_current_tool(self):
+        """Return currently held tool to its storage location"""
+        if not self.current_tool:
+            return True  # No tool to return
+        
+        tool_name = self.current_tool
+        self.publish_status(f'Returning {tool_name}')
+        
+        tool_pos = self.tool_positions[tool_name]
+        
+        # Approach position
+        approach_pose = Pose()
+        approach_pose.position.x = tool_pos['x']
+        approach_pose.position.y = tool_pos['y']
+        approach_pose.position.z = tool_pos['z'] + 0.1
+        approach_pose.orientation.w = 1.0
+        
+        # Move to approach
+        if not self.execute_motion_to_pose(approach_pose, "approach_storage"):
+            return False
+        
+        # Lower to storage position
+        storage_pose = Pose()
+        storage_pose.position.x = tool_pos['x']
+        storage_pose.position.y = tool_pos['y']
+        storage_pose.position.z = tool_pos['z']
+        storage_pose.orientation.w = 1.0
+        
+        if not self.execute_motion_to_pose(storage_pose, "place_tool"):
+            return False
+        
+        # Open gripper to release
+        if not self.execute_gripper_action('open'):
+            return False
+        
+        # Retract
+        if not self.execute_motion_to_pose(approach_pose, "retract_from_tool"):
+            return False
+        
+        self.current_tool = None
+        self.publish_status(f'{tool_name} returned')
+        return True
+
+    def move_to_home_position(self):
+        """Move arm to predefined home configuration"""
+        self.get_logger().info('Moving to home position')
+        
+        if not self.moveit_available:
+            self.get_logger().warn('MoveIt not available, cannot move to home')
+            return False
+        
+        try:
+            # Use named state from SRDF
+            self.planning_component.setStartStateToCurrentState()
+            
+            # Set goal to named state "home"
+            robot_state = RobotState(self.robot_model)
+            robot_state.setToDefaultValues(self.arm_group, "home")
+            
+            self.planning_component.setGoal(robot_state)
+            
+            # Plan
+            plan_solution = self.planning_component.plan()
+            
+            if plan_solution:
+                # Execute
+                robot_trajectory = plan_solution.trajectory
+                if robot_trajectory and len(robot_trajectory.joint_trajectory.points) > 0:
+                    final_point = robot_trajectory.joint_trajectory.points[-1]
+                    joint_values = list(final_point.positions)
+                    
+                    self.send_joints_to_esp32(joint_values, "home")
+                    self.publish_joint_states(joint_values)
+                    
+                    self.get_logger().info('Home position reached')
+                    return True
+            
+            self.get_logger().error('Failed to plan to home position')
+            return False
+            
+        except Exception as e:
+            self.get_logger().error(f'Move to home failed: {e}')
+            return False
+
+    def is_pose_safe(self, pose):
+        """Check if pose is within safe workspace limits"""
+        x = pose.position.x
+        y = pose.position.y
+        z = pose.position.z
+        
+        if not (self.workspace_limits['x_min'] <= x <= self.workspace_limits['x_max']):
+            self.get_logger().warn(f'X={x:.3f} outside range [{self.workspace_limits["x_min"]}, {self.workspace_limits["x_max"]}]')
+            return False
+        
+        if not (self.workspace_limits['y_min'] <= y <= self.workspace_limits['y_max']):
+            self.get_logger().warn(f'Y={y:.3f} outside range [{self.workspace_limits["y_min"]}, {self.workspace_limits["y_max"]}]')
+            return False
+        
+        if not (self.workspace_limits['z_min'] <= z <= self.workspace_limits['z_max']):
+            self.get_logger().warn(f'Z={z:.3f} outside range [{self.workspace_limits["z_min"]}, {self.workspace_limits["z_max"]}]')
+            return False
+        
+        return True
+
+    def publish_status(self, message):
+        """Publish status message"""
+        msg = String()
+        msg.data = f"[Motion] {message}"
+        self.motion_status_pub.publish(msg)
+        self.get_logger().info(message)
+
+    def publish_joint_states(self, joint_values):
+        """Publish current joint state"""
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name = self.joint_names
+        msg.position = joint_values
+        msg.velocity = [0.0] * len(joint_values)
+        msg.effort = [0.0] * len(joint_values)
+        
+        self.joint_state_pub.publish(msg)
+
+    def __del__(self):
+        """Cleanup on node shutdown"""
+        if self.esp32_serial and self.esp32_serial.is_open:
+            self.esp32_serial.close()
+            self.get_logger().info('ESP32 serial connection closed')
