@@ -122,17 +122,6 @@ class motionControlNode(Node):
             
         except Exception as e:
             self.get_logger().error(f'MoveIt2 initialization failed: {e}')
-            self.get_logger().error('Troubleshooting steps:')
-            self.get_logger().error('1. Make sure your robot description is loaded: ros2 param get /robot_description robot_description')
-            self.get_logger().error('2. Check MoveIt2 is running: ros2 node list | grep move_group')
-            self.get_logger().error('3. Verify your planning groups in SRDF match the arm_group_name')
-            self.acceleration_scaling = 0.5
-            
-            # Move to home position on startup
-            self.move_to_home_position()
-            
-        except Exception as e:
-            self.get_logger().error(f'MoveIt2 initialization failed: {e}')
             raise
 
     def move_to_position_callback(self, request, response):

@@ -120,7 +120,7 @@
     child="link2"
     origin_xyz="-0.22734 -0.019963 -0.033894"
     origin_rpy="-3.1416 1.32 0"
-    axis_xyz="0 0 1" />
+    axis_xyz="0 1 0" />
 
   <!-- Link 3 -->
   <xacro:robot_link
@@ -143,7 +143,7 @@
     child="link3"
     origin_xyz="0.17293 -0.022596 -0.0052474"
     origin_rpy="-3.0862 0 1.5708"
-    axis_xyz="0 0 1" />
+    axis_xyz="0 1 0" />
 
   <!-- Link 4 -->
   <xacro:robot_link
@@ -166,7 +166,7 @@
     child="link4"
     origin_xyz="0.0071183 0.051786 -1.7208E-05"
     origin_rpy="-3.1394 0 -1.5708"
-    axis_xyz="0 0 1" />
+    axis_xyz="0 1 0" />
 
   <!-- End Effector -->
   <xacro:robot_link

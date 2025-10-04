@@ -7,6 +7,8 @@ from my_package.msg import Ingredients, Steps
 from geometry_msgs.msg import Pose
 from std_msgs.msg import String
 from dataclasses import dataclass
+import tf2_ros
+from tf2_geometry_msgs import do_transform_pose
 
 @dataclass
 class ArmStep:
@@ -14,6 +16,7 @@ class ArmStep:
     target: str = None   # ingredient name
     tool: str = None     # 'gripper', 'knife', 'spoon'
     pose: Pose = None    # target pose
+    
 
 class controlNode(Node):
     def __init__(self):
@@ -32,6 +35,9 @@ class controlNode(Node):
         # Configuration
         self.grid_size = 0.1  # meters per grid unit
         self.current_tool = None
+        # Add TF2 buffer and listener
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         # Wait for all services
         self.wait_for_services()
@@ -248,14 +254,45 @@ class controlNode(Node):
             return False
 
     def get_ingredient_pose(self, ing_msg):
-        """Convert ingredient grid coordinates to pose"""
-        pose = Pose()
-        pose.position.x = ing_msg.x_grid * self.grid_size
-        pose.position.y = ing_msg.y_grid * self.grid_size
-        pose.position.z = ing_msg.z_grid * self.grid_size
-        pose.orientation.w = 1.0
-        return pose
-
+        """Convert ingredient coordinates from camera frame to base_link frame using TF2"""
+        try:
+            # Create pose in camera_link frame
+            camera_pose = PoseStamped()
+            camera_pose.header.frame_id = 'camera_link'
+            camera_pose.header.stamp = self.get_clock().now().to_msg()
+            
+            # Convert normalized image coordinates to 3D position
+            # x_grid and y_grid are normalized [-0.5, 0.5]
+            # Assuming camera field of view, scale to physical dimensions
+            camera_pose.pose.position.x = ing_msg.x_grid * ing_msg.distance  # Lateral
+            camera_pose.pose.position.y = ing_msg.y_grid * ing_msg.distance  # Vertical
+            camera_pose.pose.position.z = ing_msg.distance  # Forward distance
+            camera_pose.pose.orientation.w = 1.0
+            
+            # Transform from camera_link to base_link using TF2
+            base_pose = self.tf_buffer.transform(
+                camera_pose, 
+                'base_link',
+                timeout=rclpy.duration.Duration(seconds=1.0)
+            )
+            
+            self.get_logger().info(
+                f"Transformed {ing_msg.name}: "
+                f"camera({camera_pose.pose.position.x:.2f}, "
+                f"{camera_pose.pose.position.y:.2f}, "
+                f"{camera_pose.pose.position.z:.2f}) -> "
+                f"base({base_pose.pose.position.x:.2f}, "
+                f"{base_pose.pose.position.y:.2f}, "
+                f"{base_pose.pose.position.z:.2f})"
+            )
+            
+            return base_pose.pose
+            
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, 
+                tf2_ros.ExtrapolationException) as e:
+            self.get_logger().error(f'TF2 transform failed: {e}')
+            self.get_logger().error('Check that camera_link transform is published!')
+            return pose
     def cleanup(self):
         """Return tools and move to home position"""
         try:
