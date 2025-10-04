@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import tf2_ros
 from tf2_geometry_msgs import do_transform_pose
 import math
+import time
+import threading
 
 @dataclass
 class ArmStep:
@@ -46,19 +48,29 @@ class controlNode(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         
         self.workflow_started = False
+        self.executor = None  # Will be set by main()
 
         # Only wait for detection and recipe services initially
-        self.get_logger().info('Waiting for detection and planning services...')
+        self.get_logger().info('Control node initialized, waiting for services...')
         self.wait_for_initial_services()
 
         # Start workflow after a delay to ensure TF is ready
-        self.create_timer(2.0, self.start_workflow_once)
+        self.workflow_timer = self.create_timer(3.0, self.start_workflow_once)
+
+    def set_executor(self, executor):
+        """Set the executor reference for proper async handling"""
+        self.executor = executor
 
     def start_workflow_once(self):
         """Start workflow once, then disable timer"""
         if not self.workflow_started:
             self.workflow_started = True
-            self.execute_workflow()
+            self.workflow_timer.cancel()  # Cancel the timer
+            
+            # Run workflow in a separate thread to avoid blocking the executor
+            workflow_thread = threading.Thread(target=self.execute_workflow)
+            workflow_thread.daemon = True
+            workflow_thread.start()
 
     def wait_for_initial_services(self):
         """Wait only for detection and planning services at startup"""
@@ -71,7 +83,7 @@ class controlNode(Node):
             while not client.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info(f'Waiting for {service_name} service...')
         
-        self.get_logger().info('Detection and planning services are available!')
+        self.get_logger().info('✓ Detection and planning services are available!')
 
     def wait_for_motion_services(self):
         """Wait for motion control services when needed"""
@@ -87,62 +99,91 @@ class controlNode(Node):
             while not client.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info(f'Waiting for {service_name} service...')
         
-        self.get_logger().info('Motion control services are available!')
+        self.get_logger().info('✓ Motion control services are available!')
 
     def execute_workflow(self):
-        """Main cooking workflow coordinator"""
-        self.publish_status("Starting autocook workflow")
+        """Main cooking workflow coordinator - runs in separate thread"""
+        try:
+            self.publish_status("Starting autocook workflow")
 
-        # Step 1: Detect ingredients
-        self.publish_status("Step 1: Detecting ingredients")
-        ingredients = self.detect_ingredients()
-        self.get_logger().error(f'{ingredients}')
-        if not ingredients:
-            self.get_logger().error('Failed to detect ingredients')
-            self.publish_status("Workflow failed: No ingredients detected")
-            return
+            # Step 1: Detect ingredients
+            self.publish_status("Step 1: Detecting ingredients")
+            ingredients = self.detect_ingredients()
+            
+            if not ingredients:
+                self.get_logger().error('Failed to detect ingredients')
+                self.publish_status("Workflow failed: No ingredients detected")
+                return
 
-        self.get_logger().info(f'Detected {len(ingredients)} ingredients')
+            self.get_logger().info(f'✓ Detected {len(ingredients)} ingredients: {[i.name for i in ingredients]}')
 
-        # Step 2: Generate recipe
-        self.publish_status("Step 2: Generating recipe")
-        recipe = self.generate_recipe(ingredients)
-        if not recipe:
-            self.get_logger().error('Failed to generate recipe')
-            self.publish_status("Workflow failed: Recipe generation failed")
-            return
+            # Step 2: Generate recipe
+            self.publish_status("Step 2: Generating recipe")
+            recipe = self.generate_recipe(ingredients)
+            if not recipe:
+                self.get_logger().error('Failed to generate recipe')
+                self.publish_status("Workflow failed: Recipe generation failed")
+                return
 
-        self.get_logger().info(f'Generated recipe: {recipe.recipe_name}')
+            self.get_logger().info(f'✓ Generated recipe: {recipe.recipe_name}')
 
-        # Step 3: NOW wait for motion services before executing
-        self.publish_status("Step 3: Waiting for motion control system...")
-        self.wait_for_motion_services()
+            # Step 3: NOW wait for motion services before executing
+            self.publish_status("Step 3: Waiting for motion control system...")
+            self.wait_for_motion_services()
 
-        # Step 4: Execute cooking steps
-        self.publish_status("Step 4: Executing cooking steps")
-        self.process_recipe(recipe, ingredients)
+            # Step 4: Execute cooking steps
+            self.publish_status("Step 4: Executing cooking steps")
+            self.process_recipe(recipe, ingredients)
 
-        # Step 5: Return to home and cleanup
-        self.publish_status("Step 5: Cleaning up")
-        self.cleanup()
+            # Step 5: Return to home and cleanup
+            self.publish_status("Step 5: Cleaning up")
+            self.cleanup()
 
-        self.publish_status("Autocook workflow completed successfully!")
+            self.publish_status("✓ Autocook workflow completed successfully!")
+            
+        except Exception as e:
+            self.get_logger().error(f'Workflow failed with exception: {e}')
+            import traceback
+            traceback.print_exc()
+            self.publish_status(f"Workflow failed: {str(e)}")
+
+    def call_service_async(self, client, request, timeout_sec=10.0):
+        """Helper method to properly call services asynchronously with MultiThreadedExecutor"""
+        future = client.call_async(request)
+        
+        # Wait for the future to complete
+        start_time = time.time()
+        while not future.done():
+            if (time.time() - start_time) > timeout_sec:
+                future.cancel()
+                return None
+            time.sleep(0.01)  # Small sleep to avoid busy waiting
+        
+        return future.result()
 
     def detect_ingredients(self):
         """Call ingredient detection service"""
         try:
+            if not self.detect_client.wait_for_service(timeout_sec=5.0):
+                self.get_logger().error('detect_ingredients service not available')
+                return None
+            
             request = DetectIngredients.Request()
             self.get_logger().info('Calling detect_ingredients service...')
-            future = self.detect_client.call_async(request)
             
-            # Use the future's result() method with timeout (works with MultiThreadedExecutor)
-            result = future.result()
+            # Use helper method for proper async handling
+            result = self.call_service_async(self.detect_client, request, timeout_sec=10.0)
             
-            if result:
-                self.get_logger().info(f'✓ Received {len(result.ingredients)} ingredients: {[i.name for i in result.ingredients]}')
+            if result and result.ingredients:
+                self.get_logger().info(f'✓ Received {len(result.ingredients)} ingredients from service')
+                
+                # Log each ingredient
+                for i, ing in enumerate(result.ingredients):
+                    self.get_logger().debug(f'  [{i}] {ing.name}')
+                
                 return result.ingredients
             else:
-                self.get_logger().error('Service returned None result')
+                self.get_logger().error('Service returned None or empty result')
                 return None
                 
         except Exception as e:
@@ -150,21 +191,33 @@ class controlNode(Node):
             import traceback
             traceback.print_exc()
             return None
+
     def generate_recipe(self, ingredients):
         """Call recipe generation service"""
         try:
+            if not self.recipe_client.wait_for_service(timeout_sec=5.0):
+                self.get_logger().error('generate_recipe service not available')
+                return None
+            
             request = GenerateRecipe.Request()
             request.ingredients = ingredients
-            future = self.recipe_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=30.0)
             
-            if future.result():
-                return future.result()
+            self.get_logger().info(f'Calling generate_recipe with {len(ingredients)} ingredients...')
+            
+            # Use helper method with longer timeout for LLM
+            result = self.call_service_async(self.recipe_client, request, timeout_sec=60.0)
+            
+            if result:
+                self.get_logger().info(f'✓ Recipe received: {result.recipe_name}')
+                return result
             else:
+                self.get_logger().error('Recipe service returned None')
                 return None
                 
         except Exception as e:
             self.get_logger().error(f'Recipe generation failed: {e}')
+            import traceback
+            traceback.print_exc()
             return None
 
     def process_recipe(self, recipe, detected_ingredients):
@@ -256,7 +309,7 @@ class controlNode(Node):
                     self.get_logger().error(f'Failed to execute gripper {gripper_action}')
                     return False
 
-            self.get_logger().info(f'Successfully executed: {arm_step.action} on {arm_step.target}')
+            self.get_logger().info(f'✓ Successfully executed: {arm_step.action} on {arm_step.target}')
             return True
 
         except Exception as e:
@@ -266,17 +319,16 @@ class controlNode(Node):
     def move_to_pose(self, pose, action_type="move"):
         """Move arm to specified pose using motion service"""
         try:
+            if not self.motion_client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().warn('Motion service not ready, skipping')
+                return True
+            
             request = MoveToPosition.Request()
             request.target_pose = pose
             request.action_type = action_type
 
-            future = self.motion_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=30.0)
-
-            if future.result():
-                return future.result().success
-            else:
-                return False
+            result = self.call_service_async(self.motion_client, request, timeout_sec=30.0)
+            return result.success if result else False
 
         except Exception as e:
             self.get_logger().error(f'Motion service call failed: {e}')
@@ -285,16 +337,15 @@ class controlNode(Node):
     def execute_grip(self, action):
         """Execute gripper action using grip service"""
         try:
+            if not self.grip_client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().warn('Grip service not ready, skipping')
+                return True
+            
             request = ExecuteGrip.Request()
             request.action = action
 
-            future = self.grip_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
-
-            if future.result():
-                return future.result().success
-            else:
-                return False
+            result = self.call_service_async(self.grip_client, request, timeout_sec=10.0)
+            return result.success if result else False
 
         except Exception as e:
             self.get_logger().error(f'Grip service call failed: {e}')
@@ -303,17 +354,19 @@ class controlNode(Node):
     def set_tool(self, tool_name):
         """Set/change tool using tool service"""
         try:
+            if not self.tool_client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().warn('Tool service not ready, skipping')
+                return True
+            
             request = SetTool.Request()
             request.tool_name = tool_name
 
-            future = self.tool_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=15.0)
-
-            if future.result() and future.result().success:
-                self.current_tool = future.result().current_tool
+            result = self.call_service_async(self.tool_client, request, timeout_sec=15.0)
+            
+            if result and result.success:
+                self.current_tool = result.current_tool
                 return True
-            else:
-                return False
+            return False
 
         except Exception as e:
             self.get_logger().error(f'Tool service call failed: {e}')
@@ -322,10 +375,21 @@ class controlNode(Node):
     def get_ingredient_pose(self, ing_msg):
         """Convert ingredient coordinates from camera frame to base_link frame using TF2"""
         try:
-            # Create pose in camera_link frame using PROPER pinhole camera model
+            # Handle hardcoded ingredients (all zeros)
+            if ing_msg.x_center == 0 and ing_msg.y_center == 0 and ing_msg.distance == 0:
+                default_pose = Pose()
+                default_pose.position.x = 0.3
+                default_pose.position.y = 0.0
+                default_pose.position.z = 0.2
+                default_pose.orientation.w = 1.0
+                
+                self.get_logger().debug(f'Using default pose for hardcoded ingredient: {ing_msg.name}')
+                return default_pose
+            
+            # Create pose in camera_link frame
             camera_pose = PoseStamped()
             camera_pose.header.frame_id = 'camera_link'
-            camera_pose.header.stamp = rclpy.time.Time().to_msg()
+            camera_pose.header.stamp = self.get_clock().now().to_msg()
             
             # Extract pixel coordinates from message
             pixel_x = ing_msg.x_center
@@ -362,7 +426,7 @@ class controlNode(Node):
                     timeout=rclpy.duration.Duration(seconds=1.0)
                 )
                 
-                self.get_logger().info(
+                self.get_logger().debug(
                     f"Transformed {ing_msg.name}: "
                     f"base({base_pose.pose.position.x:.3f}, "
                     f"{base_pose.pose.position.y:.3f}, "
@@ -373,17 +437,16 @@ class controlNode(Node):
                 
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException, 
                     tf2_ros.ExtrapolationException) as e:
-                self.get_logger().error(f'TF2 transform failed: {e}')
-                self.get_logger().error('Check that camera_link->base_link transform is published!')
+                self.get_logger().warn(f'TF2 transform failed: {e}')
                 
-                # Return a safe default pose instead of undefined variable
+                # Return a safe default pose
                 default_pose = Pose()
                 default_pose.position.x = 0.3
                 default_pose.position.y = 0.0
                 default_pose.position.z = 0.2
                 default_pose.orientation.w = 1.0
                 
-                self.get_logger().error(f'Using default pose for {ing_msg.name}')
+                self.get_logger().debug(f'Using default pose for {ing_msg.name}')
                 return default_pose
                 
         except Exception as e:
@@ -420,16 +483,26 @@ class controlNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
+    
+    # Create node
     node = controlNode()
     
+    # Use MultiThreadedExecutor for proper async handling
     from rclpy.executors import MultiThreadedExecutor
     executor = MultiThreadedExecutor()
     executor.add_node(node)
     
+    # Set executor reference in node
+    node.set_executor(executor)
+    
     try:
         executor.spin()
     except KeyboardInterrupt:
-        pass
+        node.get_logger().info('Interrupted by user')
+    except Exception as e:
+        node.get_logger().error(f'Unexpected error: {e}')
+        import traceback
+        traceback.print_exc()
     finally:
         node.destroy_node()
         rclpy.shutdown()
