@@ -68,47 +68,73 @@ class webcamNode(Node):
                 label = result.names[int(box.cls)]
                 confidence = float(box.conf[0])
                 
-                if confidence < 0.5:
+                # Filter by confidence
+                if confidence < self.confidence_threshold:
                     continue
                 
+                # Get bounding box
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 pixel_width = x2 - x1
                 pixel_height = y2 - y1
                 
-                if pixel_width < 20 or pixel_height < 20:
+                # Filter tiny detections
+                if pixel_width < self.min_pixel_size or pixel_height < self.min_pixel_size:
                     continue
 
-                center_x = (x1 + x2) / 2
-                center_y = (y1 + y2) / 2
+                # Calculate center in pixel coordinates
+                center_x = float((x1 + x2) / 2.0)
+                center_y = float((y1 + y2) / 2.0)
 
-                real_width = self.real_widths.get(label, 0.1)
-                distance = (real_width * self.focal_length) / pixel_width if pixel_width > 0 else 0.5
-                distance = max(0.2, min(distance, 2.0))
+                # Estimate distance using pinhole camera model
+                real_width = self.real_widths.get(label, 0.08)  # Default 8cm
+                
+                if pixel_width > 0:
+                    # Distance = (Real_Width * Focal_Length) / Pixel_Width
+                    distance = (real_width * self.focal_length) / pixel_width
+                    
+                    #   Add uncertainty bounds (±30% typical error)
+                    distance_min = distance * 0.7
+                    distance_max = distance * 1.3
+                    
+                    # Clamp to reasonable range
+                    distance = max(0.15, min(distance, 2.5))
+                else:
+                    distance = 0.5  # Default fallback
+                    distance_min = 0.35
+                    distance_max = 0.65
 
-                norm_x = (center_x / self.image_width) - 0.5
-                norm_y = (center_y / self.image_height) - 0.5
-
+                #   FIXED: Store actual pixel coordinates, not normalized
+                # The controlNode will handle the conversion to 3D
                 ingredient_msg = Ingredients()
                 ingredient_msg.name = label
-                ingredient_msg.x_center = float(center_x)
-                ingredient_msg.y_center = float(center_y)
-                ingredient_msg.x_grid = float(norm_x)
-                ingredient_msg.y_grid = float(norm_y)
-                ingredient_msg.z_grid = 0.0
-                ingredient_msg.distance = float(distance)
+                ingredient_msg.x_center = center_x  # Actual pixel coordinate
+                ingredient_msg.y_center = center_y  # Actual pixel coordinate
+                ingredient_msg.x_grid = 0.0  # Unused (kept for compatibility)
+                ingredient_msg.y_grid = 0.0  # Unused (kept for compatibility)
+                ingredient_msg.z_grid = 0.0  # Unused
+                ingredient_msg.distance = distance
                 response.ingredients.append(ingredient_msg)
 
+                # Store detection for JSON logging
                 detection = {
-                    'name': label, 'confidence': confidence,
-                    'center_x': float(center_x), 'center_y': float(center_y),
-                    'distance': float(distance),
-                    'bbox': [float(x1), float(y1), float(x2), float(y2)]
+                    'name': label,
+                    'confidence': float(confidence),
+                    'center_x': center_x,
+                    'center_y': center_y,
+                    'distance': distance,
+                    'distance_range': [float(distance_min), float(distance_max)],
+                    'bbox': [float(x1), float(y1), float(x2), float(y2)],
+                    'pixel_width': float(pixel_width),
+                    'real_width_assumed': real_width
                 }
                 detected_data.append(detection)
 
-                self._draw_detection(frame, label, confidence, distance, 
-                                   int(x1), int(y1), int(x2), int(y2), 
-                                   int(center_x), int(center_y))
+                # Draw on frame
+                self._draw_detection(
+                    frame, label, confidence, distance, 
+                    int(x1), int(y1), int(x2), int(y2), 
+                    int(center_x), int(center_y)
+                )
 
         if detected_data:
             self.get_logger().info(f"Detected {len(detected_data)} objects")

@@ -15,14 +15,14 @@ class planningNode(Node):
         # Keep original line (even though we overwrite it later)
         ingredient_names = [ing.name for ing in request.ingredients]
         ingredients = ', '.join(ingredient_names) # Remove duplicates
-
+        if not ingredient_names:
         # Hardcoded grocery list (overrides request.ingredients)
-        common_groceries = [
-            "flour", "sugar", "salt", "butter", "milk", "eggs",
-            "rice", "pasta", "tomatoes", "onions", "garlic",
-            "chicken", "beef", "carrots", "potatoes", "cheese"
-        ]
-        ingredients = ', '.join(common_groceries)
+            common_groceries = [
+                "flour", "sugar", "salt", "butter", "milk", "eggs",
+                "rice", "pasta", "tomatoes", "onions", "garlic",
+                "chicken", "beef", "carrots", "potatoes", "cheese"
+            ]
+            ingredients = ', '.join(common_groceries)
 
         # Build prompt for multiple recipes
         prompt = (

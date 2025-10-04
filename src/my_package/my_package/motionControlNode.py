@@ -10,11 +10,9 @@ import json
 import serial
 import time
 
-# MoveIt2 imports - Official API only
+# MoveIt2 imports
 from moveit.planning import MoveItPy
 from moveit.core.robot_state import RobotState
-from moveit.core.planning_scene import PlanningScene
-from moveit.core.robot_model import RobotModel
 
 # Custom service imports
 from my_package.srv import MoveToPosition, ExecuteGrip, SetTool
@@ -33,17 +31,19 @@ class motionControlNode(Node):
         self.motion_status_pub = self.create_publisher(String, 'motion_status', 10)
         self.esp32_command_pub = self.create_publisher(String, 'esp32_commands', 10)
 
-        # ESP32 Serial Communication
-        try:
-            self.esp32_serial = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-            time.sleep(2)
-            self.get_logger().info('ESP32 serial connection established')
-        except Exception as e:
-            self.get_logger().error(f'Failed to connect to ESP32: {e}')
-            self.esp32_serial = None
+        # ESP32 Serial Communication with retry
+        self.esp32_serial = None
+        self.esp32_max_retries = 3
+        self.connect_esp32()
 
         # Initialize MoveIt2
-        self.setup_moveit2()
+        self.moveit_available = False
+        try:
+            self.setup_moveit2()
+            self.moveit_available = True
+        except Exception as e:
+            self.get_logger().error(f'MoveIt2 initialization failed: {e}')
+            self.get_logger().warn('Continuing without MoveIt2 - using direct control only')
 
         # Motion state tracking
         self.current_tool = None
@@ -56,7 +56,7 @@ class motionControlNode(Node):
             'spoon': {'x': 0.0, 'y': -0.3, 'z': 0.15}
         }
 
-        # Workspace safety limits
+        # Workspace safety limits (meters, relative to base_link)
         self.workspace_limits = {
             'x_min': 0.05, 'x_max': 0.5,
             'y_min': -0.4, 'y_max': 0.4,
@@ -65,64 +65,80 @@ class motionControlNode(Node):
 
         self.get_logger().info('Motion control node initialized and ready')
 
+    def connect_esp32(self):
+        """Connect to ESP32 with error handling"""
+        try:
+            self.esp32_serial = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+            time.sleep(2)
+            self.get_logger().info('ESP32 serial connection established')
+        except serial.SerialException as e:
+            self.get_logger().error(f'Failed to connect to ESP32 on /dev/ttyUSB0: {e}')
+            try:
+                # Try alternative port
+                self.esp32_serial = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+                time.sleep(2)
+                self.get_logger().info('ESP32 connected on /dev/ttyACM0')
+            except:
+                self.get_logger().error('Failed to connect to ESP32 on any port')
+                self.esp32_serial = None
+
     def setup_moveit2(self):
         """Initialize MoveIt2 components for ROS2 Rolling"""
-        self.get_logger().info('Initializing MoveIt2 components for ROS2 Rolling...')
+        self.get_logger().info('Initializing MoveIt2 components...')
         
-        try:
-            # Initialize MoveItPy for ROS2 Rolling
-            self.moveit = MoveItPy(node_name="motion_control_moveit")
-            
-            # Get robot model and planning scene monitor
-            self.robot_model = self.moveit.get_robot_model()
-            self.planning_scene_monitor = self.moveit.get_planning_scene_monitor()
-            
-            # Set up planning groups (adjust based on your robot URDF)
-            self.arm_group_name = "arm"  # Change to your arm group name
-            self.gripper_group_name = "gripper"  # Change to your gripper group name
-            
-            self.get_logger().info(f'Robot model: {self.robot_model.getName()}')
-            
-            # Get available joint model groups
-            available_groups = self.robot_model.getJointModelGroupNames()
-            self.get_logger().info(f'Available joint groups: {available_groups}')
-            
-            # Check if arm group exists
-            if self.arm_group_name not in available_groups:
-                self.get_logger().error(f"Joint group '{self.arm_group_name}' not found!")
-                self.get_logger().error(f"Available groups: {available_groups}")
-                self.get_logger().error("Please update self.arm_group_name to match your robot's URDF")
-                raise ValueError(f"Joint group '{self.arm_group_name}' not found. Available: {available_groups}")
-            
-            # Get joint model group for arm
-            self.arm_group = self.robot_model.getJointModelGroup(self.arm_group_name)
-            self.get_logger().info(f'Arm group "{self.arm_group_name}" loaded successfully')
-            
-            # Check for gripper group
-            if self.gripper_group_name in available_groups:
-                self.gripper_group = self.robot_model.getJointModelGroup(self.gripper_group_name)
-                self.get_logger().info(f'Gripper group "{self.gripper_group_name}" found')
-            else:
-                self.gripper_group = None
-                self.get_logger().warn(f'Gripper group "{self.gripper_group_name}" not found - using manual control')
-            
-            # Get planning component for the arm group
-            self.planning_component = self.moveit.get_planning_component(self.arm_group_name)
-            self.get_logger().info(f'Planning component created for group: {self.arm_group_name}')
-            
-            # Set planning parameters
-            self.planning_time = 10.0
-            self.velocity_scaling = 0.5
-            self.acceleration_scaling = 0.5
-            
-            self.get_logger().info('MoveIt2 initialization completed successfully')
-            
-            # Move to home position on startup
-            self.move_to_home_position()
-            
-        except Exception as e:
-            self.get_logger().error(f'MoveIt2 initialization failed: {e}')
-            raise
+        # Initialize MoveItPy
+        self.moveit = MoveItPy(node_name="motion_control_moveit")
+        
+        # Get robot model
+        self.robot_model = self.moveit.get_robot_model()
+        self.planning_scene_monitor = self.moveit.get_planning_scene_monitor()
+        
+        # Set up planning groups (must match SRDF)
+        self.arm_group_name = "arm"
+        self.gripper_group_name = "gripper"  # May not exist
+        
+        self.get_logger().info(f'Robot model: {self.robot_model.getName()}')
+        
+        # Get available joint model groups
+        available_groups = self.robot_model.getJointModelGroupNames()
+        self.get_logger().info(f'Available joint groups: {available_groups}')
+        
+        # Validate arm group exists
+        if self.arm_group_name not in available_groups:
+            raise ValueError(
+                f"Joint group '{self.arm_group_name}' not found. "
+                f"Available: {available_groups}. "
+                f"Check your SRDF file!"
+            )
+        
+        # Get joint model group for arm
+        self.arm_group = self.robot_model.getJointModelGroup(self.arm_group_name)
+        
+        #   FIXED: Get actual joint names from URDF
+        self.joint_names = self.arm_group.getVariableNames()
+        self.get_logger().info(f'Arm joints: {self.joint_names}')
+        
+        # Check for gripper group
+        if self.gripper_group_name in available_groups:
+            self.gripper_group = self.robot_model.getJointModelGroup(self.gripper_group_name)
+            self.get_logger().info(f'Gripper group found')
+        else:
+            self.gripper_group = None
+            self.get_logger().warn(f'Gripper group not found - using manual control')
+        
+        # Get planning component
+        self.planning_component = self.moveit.get_planning_component(self.arm_group_name)
+        self.get_logger().info(f'Planning component created')
+        
+        # Set planning parameters
+        self.planning_time = 10.0  # seconds
+        self.velocity_scaling = 0.5  # 50% of max velocity for safety
+        self.acceleration_scaling = 0.5  # 50% of max acceleration
+        
+        self.get_logger().info('MoveIt2 initialization completed')
+        
+        # Move to home position
+        self.move_to_home_position()
 
     def move_to_position_callback(self, request, response):
         """Service callback for moving to a specific pose"""
@@ -130,10 +146,19 @@ class motionControlNode(Node):
             pose = request.target_pose
             action_type = request.action_type
             
-            self.get_logger().info(f'Moving to position: ({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})')
+            self.get_logger().info(
+                f'Move request: ({pose.position.x:.3f}, {pose.position.y:.3f}, '
+                f'{pose.position.z:.3f}) for action: {action_type}'
+            )
             
             # Safety check
             if not self.is_pose_safe(pose):
+                self.get_logger().error(
+                    f'Pose outside safe workspace: '
+                    f'x:[{self.workspace_limits["x_min"]}, {self.workspace_limits["x_max"]}], '
+                    f'y:[{self.workspace_limits["y_min"]}, {self.workspace_limits["y_max"]}], '
+                    f'z:[{self.workspace_limits["z_min"]}, {self.workspace_limits["z_max"]}]'
+                )
                 response.success = False
                 response.message = "Target pose outside safe workspace"
                 return response
@@ -142,7 +167,7 @@ class motionControlNode(Node):
             success = self.execute_motion_to_pose(pose, action_type)
             
             response.success = success
-            response.message = "Motion completed successfully" if success else "Moti on failed"
+            response.message = "Motion completed successfully" if success else "Motion failed"
             
             return response
             
@@ -195,16 +220,25 @@ class motionControlNode(Node):
             return response
 
     def execute_motion_to_pose(self, pose, action_type="move"):
-        """Execute motion using MoveIt2 for ROS2 Rolling"""
+        """Execute motion using MoveIt2"""
+        if not self.moveit_available:
+            self.get_logger().error('MoveIt2 not available, cannot execute motion')
+            return False
+            
         try:
             self.is_moving = True
-            self.publish_status(f"Planning motion to ({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})")
+            self.publish_status(
+                f"Planning motion to ({pose.position.x:.3f}, "
+                f"{pose.position.y:.3f}, {pose.position.z:.3f})"
+            )
             
             # Set start state to current state
             self.planning_component.setStartStateToCurrentState()
             
-            # Set goal pose (adjust end_effector_link based on your robot)
-            self.planning_component.setGoal(pose, "end_effector_link")
+            # Set goal pose
+            #   TODO: Verify your end effector link name matches URDF
+            end_effector_link = "ee"  # Change if different in your URDF
+            self.planning_component.setGoal(pose, end_effector_link)
             
             # Plan motion
             plan_solution = self.planning_component.plan()
@@ -213,13 +247,14 @@ class motionControlNode(Node):
             if plan_solution:
                 self.publish_status('Motion planning successful, executing...')
                 
-                # Execute the planned trajectory
                 robot_trajectory = plan_solution.trajectory
                 
                 if robot_trajectory and len(robot_trajectory.joint_trajectory.points) > 0:
                     # Get joint values from trajectory (final point)
                     final_point = robot_trajectory.joint_trajectory.points[-1]
                     joint_values = list(final_point.positions)
+                    
+                    self.get_logger().info(f'Planned joint values: {joint_values}')
                     
                     # Send to ESP32
                     esp32_success = self.send_joints_to_esp32(joint_values, action_type)
@@ -231,14 +266,15 @@ class motionControlNode(Node):
                         return True
                     else:
                         self.get_logger().warn('ESP32 communication failed but planning succeeded')
+                        self.publish_joint_states(joint_values)
                         self.is_moving = False
-                        return True  # Still success from MoveIt perspective
+                        return True  # Still success from planning perspective
                 else:
                     self.get_logger().error('Empty trajectory received')
                     self.is_moving = False
                     return False
             else:
-                self.get_logger().error('Motion planning failed')
+                self.get_logger().error('Motion planning failed - no valid path found')
                 self.is_moving = False
                 return False
                 
@@ -248,238 +284,65 @@ class motionControlNode(Node):
             return False
 
     def send_joints_to_esp32(self, joint_values, action_type="move"):
-        """Send joint angles to ESP32"""
+        """  IMPROVED: Send joint angles to ESP32 with retry logic"""
         if not self.esp32_serial:
             self.get_logger().warn('ESP32 not connected, skipping hardware command')
-            return True  # Return true to not block simulation
+            return True  # Don't block simulation
         
-        try:
-            # Ensure we have 6 joint values
-            if len(joint_values) < 6:
-                joint_values.extend([0.0] * (6 - len(joint_values)))
-            
-            # Create command dictionary
-            command = {
-                'action': action_type,
-                'joints': {
-                    'J1': round(np.degrees(joint_values[0]), 2),
-                    'J2': round(np.degrees(joint_values[1]), 2),
-                    'J3': round(np.degrees(joint_values[2]), 2),
-                    'J4': round(np.degrees(joint_values[3]), 2),
-                    'J5': round(np.degrees(joint_values[4]), 2),
-                    'J6': round(np.degrees(joint_values[5]), 2)
-                },
-                'speed': 30,  # Movement speed percentage
-                'timestamp': time.time()
-            }
-            
-            # Send command
-            json_command = json.dumps(command) + '\n'
-            self.esp32_serial.write(json_command.encode())
-            
-            # Publish command for debugging
-            debug_msg = String()
-            debug_msg.data = json_command
-            self.esp32_command_pub.publish(debug_msg)
-            
-            # Wait for acknowledgment
-            response = self.esp32_serial.readline().decode().strip()
-            
-            if response == "OK":
-                self.get_logger().info(f'ESP32 command sent: {action_type}')
-                return True
-            else:
-                self.get_logger().warn(f'ESP32 response: {response}')
-                return False
-                
-        except Exception as e:
-            self.get_logger().error(f'ESP32 communication error: {e}')
-            return False
-
-    def execute_gripper_action(self, action):
-        """Execute gripper actions"""
-        if self.gripper_group:
+        for attempt in range(self.esp32_max_retries):
             try:
-                # Use MoveIt2 for gripper control if group exists
-                planning_component = self.moveit.get_planning_component(self.gripper_group_name)
+                #   FIXED: Pad to match actual number of joints
+                num_joints = len(self.joint_names)
+                if len(joint_values) < num_joints:
+                    joint_values.extend([0.0] * (num_joints - len(joint_values)))
                 
-                # Set named target (adjust names based on your gripper configuration)
-                if action in ["open", "place"]:
-                    planning_component.setGoal("open")
-                elif action in ["close", "pick"]:
-                    planning_component.setGoal("close")
+                # Create command dictionary with proper joint mapping
+                joints_dict = {}
+                for i, (name, value) in enumerate(zip(self.joint_names, joint_values)):
+                    # Map to ESP32 expected names (J1, J2, etc)
+                    joints_dict[f'J{i+1}'] = round(np.degrees(value), 2)
                 
-                # Plan and execute
-                plan_result = planning_component.plan()
-                if plan_result:
-                    self.publish_status(f'Gripper {action} via MoveIt2')
+                command = {
+                    'action': action_type,
+                    'joints': joints_dict,
+                    'speed': 30,  # Movement speed percentage
+                    'timestamp': time.time()
+                }
+                
+                # Send command
+                json_command = json.dumps(command) + '\n'
+                self.esp32_serial.write(json_command.encode())
+                self.esp32_serial.flush()
+                
+                # Publish for debugging
+                debug_msg = String()
+                debug_msg.data = json_command
+                self.esp32_command_pub.publish(debug_msg)
+                
+                # Wait for acknowledgment with timeout
+                self.esp32_serial.timeout = 2.0
+                response = self.esp32_serial.readline().decode().strip()
+                
+                if response == "OK":
+                    self.get_logger().info(f'ESP32 acknowledged: {action_type}')
                     return True
+                else:
+                    self.get_logger().warn(f'ESP32 unexpected response (attempt {attempt+1}): {response}')
+                    if attempt < self.esp32_max_retries - 1:
+                        time.sleep(0.5)  # Wait before retry
+                        continue
                     
+            except serial.SerialException as e:
+                self.get_logger().error(f'ESP32 serial error (attempt {attempt+1}): {e}')
+                if attempt < self.esp32_max_retries - 1:
+                    time.sleep(0.5)
+                    continue
             except Exception as e:
-                self.get_logger().warn(f'MoveIt2 gripper control failed: {e}')
+                self.get_logger().error(f'ESP32 communication error (attempt {attempt+1}): {e}')
+                if attempt < self.esp32_max_retries - 1:
+                    time.sleep(0.5)
+                    continue
         
-        # Fallback to direct ESP32 control
-        return self.send_gripper_to_esp32(action)
-
-    def send_gripper_to_esp32(self, action):
-        """Send gripper command directly to ESP32"""
-        if not self.esp32_serial:
-            return True
-        
-        try:
-            # Map actions to angles
-            angle_map = {
-                "open": 0.0, "place": 0.0,
-                "close": 90.0, "pick": 90.0
-            }
-            
-            angle = angle_map.get(action, 0.0)
-            
-            command = {
-                'action': 'gripper',
-                'gripper_angle': angle,
-                'speed': 50
-            }
-            
-            json_command = json.dumps(command) + '\n'
-            self.esp32_serial.write(json_command.encode())
-            
-            response = self.esp32_serial.readline().decode().strip()
-            success = response == "OK"
-            
-            if success:
-                self.get_logger().info(f'Gripper {action} sent to ESP32')
-            
-            return success
-            
-        except Exception as e:
-            self.get_logger().error(f'ESP32 gripper command failed: {e}')
-            return False
-
-    def pickup_tool(self, tool_name):
-        """Move to tool position and pick it up"""
-        if tool_name not in self.tool_positions:
-            self.get_logger().error(f'Unknown tool: {tool_name}')
-            return False
-        
-        if self.current_tool == tool_name:
-            self.get_logger().info(f'Already holding {tool_name}')
-            return True
-        
-        try:
-            # Return current tool first
-            if self.current_tool:
-                self.return_current_tool()
-            
-            # Move to tool position
-            tool_pos = self.tool_positions[tool_name]
-            pose = Pose()
-            pose.position.x = tool_pos['x']
-            pose.position.y = tool_pos['y']
-            pose.position.z = tool_pos['z']
-            pose.orientation.w = 1.0
-            
-            if self.execute_motion_to_pose(pose, f"pickup_{tool_name}"):
-                # Close gripper to grab tool
-                if self.execute_gripper_action("close"):
-                    self.current_tool = tool_name
-                    self.get_logger().info(f'Picked up {tool_name}')
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.get_logger().error(f'Tool pickup failed: {e}')
-            return False
-
-    def return_current_tool(self):
-        """Return current tool to its position"""
-        if not self.current_tool:
-            return True
-        
-        try:
-            # Move to tool return position
-            tool_pos = self.tool_positions[self.current_tool]
-            pose = Pose()
-            pose.position.x = tool_pos['x']
-            pose.position.y = tool_pos['y']
-            pose.position.z = tool_pos['z']
-            pose.orientation.w = 1.0
-            
-            if self.execute_motion_to_pose(pose, f"return_{self.current_tool}"):
-                # Open gripper to release tool
-                if self.execute_gripper_action("open"):
-                    returned_tool = self.current_tool
-                    self.current_tool = None
-                    self.get_logger().info(f'Returned {returned_tool}')
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            self.get_logger().error(f'Tool return failed: {e}')
-            return False
-
-    def move_to_home_position(self):
-        """Move arm to home/neutral position"""
-        try:
-            # Try using named configuration if available
-            planning_component = self.moveit.get_planning_component(self.arm_group_name)
-            planning_component.setGoal("home")  # Adjust named pose if you have one
-            
-            plan_result = planning_component.plan()
-            if plan_result:
-                self.get_logger().info('Moved to home position via named target')
-            else:
-                # Fallback to joint positions
-                joint_goals = [0.0, -1.57, 1.57, 0.0, 0.0, 0.0]  # Adjust for your robot
-                self.send_joints_to_esp32(joint_goals, "home")
-                self.get_logger().info('Moved to home via joint target')
-                
-        except Exception as e:
-            self.get_logger().error(f'Home position failed: {e}')
-
-    def is_pose_safe(self, pose):
-        """Check if pose is within workspace limits"""
-        x, y, z = pose.position.x, pose.position.y, pose.position.z
-        return (self.workspace_limits['x_min'] <= x <= self.workspace_limits['x_max'] and
-                self.workspace_limits['y_min'] <= y <= self.workspace_limits['y_max'] and
-                self.workspace_limits['z_min'] <= z <= self.workspace_limits['z_max'])
-
-    def publish_status(self, message):
-        """Publish status message"""
-        msg = String()
-        msg.data = f"[MotionNode] {message}"
-        self.motion_status_pub.publish(msg)
-        self.get_logger().info(message)
-
-    def publish_joint_states(self, joint_values):
-        """Publish current joint states"""
-        joint_state = JointState()
-        joint_state.header.stamp = self.get_clock().now().to_msg()
-        joint_state.name = ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']
-        joint_state.position = joint_values[:6]  # Ensure we have exactly 6 joints
-        self.joint_state_pub.publish(joint_state)
-
-    def destroy_node(self):
-        """Cleanup on node shutdown"""
-        if self.esp32_serial:
-            self.esp32_serial.close()
-        super().destroy_node()
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = motionControlNode()
-    
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+        # All retries failed
+        self.get_logger().error(f'ESP32 communication failed after {self.esp32_max_retries} attempts')
+        return False
