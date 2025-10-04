@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients, GenerateRecipe, MoveToPosition, ExecuteGrip, SetTool
 from my_package.msg import Ingredients, Steps
-from geometry_msgs.msg import Pose, PoseStamped  #   FIXED: Added PoseStamped
+from geometry_msgs.msg import Pose, PoseStamped
 from std_msgs.msg import String
 from dataclasses import dataclass
 import tf2_ros
@@ -45,11 +45,11 @@ class controlNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         
-        #   FIXED: Don't run workflow in __init__, use timer
         self.workflow_started = False
 
-        # Wait for all services
-        self.wait_for_services()
+        # Only wait for detection and recipe services initially
+        self.get_logger().info('Waiting for detection and planning services...')
+        self.wait_for_initial_services()
 
         # Start workflow after a delay to ensure TF is ready
         self.create_timer(2.0, self.start_workflow_once)
@@ -60,11 +60,24 @@ class controlNode(Node):
             self.workflow_started = True
             self.execute_workflow()
 
-    def wait_for_services(self):
-        """Wait for all required services to be available"""
+    def wait_for_initial_services(self):
+        """Wait only for detection and planning services at startup"""
         services = [
             (self.detect_client, 'detect_ingredients'),
             (self.recipe_client, 'generate_recipe'),
+        ]
+
+        for client, service_name in services:
+            while not client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info(f'Waiting for {service_name} service...')
+        
+        self.get_logger().info('Detection and planning services are available!')
+
+    def wait_for_motion_services(self):
+        """Wait for motion control services when needed"""
+        self.get_logger().info('Waiting for motion control services...')
+        
+        services = [
             (self.motion_client, 'move_to_position'),
             (self.grip_client, 'execute_grip'),
             (self.tool_client, 'set_tool')
@@ -74,7 +87,7 @@ class controlNode(Node):
             while not client.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info(f'Waiting for {service_name} service...')
         
-        self.get_logger().info('All services are available!')
+        self.get_logger().info('Motion control services are available!')
 
     def execute_workflow(self):
         """Main cooking workflow coordinator"""
@@ -83,6 +96,7 @@ class controlNode(Node):
         # Step 1: Detect ingredients
         self.publish_status("Step 1: Detecting ingredients")
         ingredients = self.detect_ingredients()
+        self.get_logger().error(f'{ingredients}')
         if not ingredients:
             self.get_logger().error('Failed to detect ingredients')
             self.publish_status("Workflow failed: No ingredients detected")
@@ -100,12 +114,16 @@ class controlNode(Node):
 
         self.get_logger().info(f'Generated recipe: {recipe.recipe_name}')
 
-        # Step 3: Execute cooking steps
-        self.publish_status("Step 3: Executing cooking steps")
+        # Step 3: NOW wait for motion services before executing
+        self.publish_status("Step 3: Waiting for motion control system...")
+        self.wait_for_motion_services()
+
+        # Step 4: Execute cooking steps
+        self.publish_status("Step 4: Executing cooking steps")
         self.process_recipe(recipe, ingredients)
 
-        # Step 4: Return to home and cleanup
-        self.publish_status("Step 4: Cleaning up")
+        # Step 5: Return to home and cleanup
+        self.publish_status("Step 5: Cleaning up")
         self.cleanup()
 
         self.publish_status("Autocook workflow completed successfully!")
@@ -114,18 +132,24 @@ class controlNode(Node):
         """Call ingredient detection service"""
         try:
             request = DetectIngredients.Request()
+            self.get_logger().info('Calling detect_ingredients service...')
             future = self.detect_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=10.0)
             
-            if future.result():
-                return future.result().ingredients
+            # Use the future's result() method with timeout (works with MultiThreadedExecutor)
+            result = future.result()
+            
+            if result:
+                self.get_logger().info(f'✓ Received {len(result.ingredients)} ingredients: {[i.name for i in result.ingredients]}')
+                return result.ingredients
             else:
+                self.get_logger().error('Service returned None result')
                 return None
                 
         except Exception as e:
             self.get_logger().error(f'Ingredient detection failed: {e}')
+            import traceback
+            traceback.print_exc()
             return None
-
     def generate_recipe(self, ingredients):
         """Call recipe generation service"""
         try:
@@ -147,7 +171,6 @@ class controlNode(Node):
         """Process recipe steps and coordinate arm movements"""
         self.get_logger().info(f'Processing recipe: {recipe.recipe_name}')
         
-        #   IMPROVED: Track which ingredients have been used
         ingredient_usage = {ing.name: 0 for ing in detected_ingredients}
         
         for step_msg in recipe.steps:
@@ -162,15 +185,13 @@ class controlNode(Node):
                 for arm_step in arm_steps:
                     success = self.execute_arm_step(arm_step)
                     if not success:
-                        self.get_logger().warn(f'Failed to execute step: {arm_step.action} on {arm_step.target}')
-                        # Continue anyway for demo purposes
+                        self.get_logger().error(f'Failed to execute step: {arm_step.action} on {arm_step.target}')
 
     def parse_recipe_step(self, step_desc, detected_ingredients, ingredient_usage):
         """Parse recipe text into structured arm movements"""
         step_desc_lower = step_desc.lower()
         arm_steps = []
 
-        #   IMPROVED: Better parsing with sequence awareness
         # Detect action types first
         has_pick = any(kw in step_desc_lower for kw in ['pick', 'grab', 'take', 'get'])
         has_place = any(kw in step_desc_lower for kw in ['place', 'put', 'add', 'drop'])
@@ -180,20 +201,16 @@ class controlNode(Node):
         # Find ingredients mentioned in the step
         for ing_msg in detected_ingredients:
             if ing_msg.name.lower() in step_desc_lower:
-                # Get the pose for this specific ingredient instance
                 pose = self.get_ingredient_pose(ing_msg)
                 
                 if pose is None:
-                    self.get_logger().warn(f'Could not get pose for {ing_msg.name}, skipping')
+                    self.get_logger().error(f'Could not get pose for {ing_msg.name}, skipping')
                     continue
 
-                #   IMPROVED: Create proper action sequences
                 if has_pick:
                     arm_steps.append(ArmStep('pick', target=ing_msg.name, tool='gripper', pose=pose))
                     ingredient_usage[ing_msg.name] += 1
                 
-                # For place, we'd need to know WHERE to place (cutting board, pan, etc)
-                # For now, use a default placement zone
                 if has_place:
                     placement_pose = self.get_placement_pose()
                     arm_steps.append(ArmStep('place', target=ing_msg.name, tool='gripper', pose=placement_pose))
@@ -303,17 +320,13 @@ class controlNode(Node):
             return False
 
     def get_ingredient_pose(self, ing_msg):
-        """  FIXED: Convert ingredient coordinates from camera frame to base_link frame using TF2"""
-
-        #need to determine position and orientation of cam for finaalise
+        """Convert ingredient coordinates from camera frame to base_link frame using TF2"""
         try:
             # Create pose in camera_link frame using PROPER pinhole camera model
             camera_pose = PoseStamped()
             camera_pose.header.frame_id = 'camera_link'
-            #   FIXED: Use Time(0) for latest available transform
             camera_pose.header.stamp = rclpy.time.Time().to_msg()
             
-            #   FIXED: Convert pixel coordinates to 3D using pinhole camera model
             # Extract pixel coordinates from message
             pixel_x = ing_msg.x_center
             pixel_y = ing_msg.y_center
@@ -324,14 +337,13 @@ class controlNode(Node):
             cy = self.image_height / 2.0
             
             # Convert pixel coordinates to camera frame 3D coordinates
-            # In camera frame: X=right, Y=down, Z=forward
             x_cam = (pixel_x - cx) * distance / self.focal_length
             y_cam = (pixel_y - cy) * distance / self.focal_length
             z_cam = distance
             
-            camera_pose.pose.position.x = z_cam      # Forward (into scene)
-            camera_pose.pose.position.y = -x_cam     # Right (in image) = left in camera frame
-            camera_pose.pose.position.z = -y_cam     # Down (in image) = up in camera frame
+            camera_pose.pose.position.x = z_cam
+            camera_pose.pose.position.y = -x_cam
+            camera_pose.pose.position.z = -y_cam
             camera_pose.pose.orientation.w = 1.0
             
             self.get_logger().debug(
@@ -364,14 +376,14 @@ class controlNode(Node):
                 self.get_logger().error(f'TF2 transform failed: {e}')
                 self.get_logger().error('Check that camera_link->base_link transform is published!')
                 
-                #   FIXED: Return a safe default pose instead of undefined variable
+                # Return a safe default pose instead of undefined variable
                 default_pose = Pose()
                 default_pose.position.x = 0.3
                 default_pose.position.y = 0.0
                 default_pose.position.z = 0.2
                 default_pose.orientation.w = 1.0
                 
-                self.get_logger().warn(f'Using default pose for {ing_msg.name}')
+                self.get_logger().error(f'Using default pose for {ing_msg.name}')
                 return default_pose
                 
         except Exception as e:
@@ -410,8 +422,12 @@ def main(args=None):
     rclpy.init(args=args)
     node = controlNode()
     
+    from rclpy.executors import MultiThreadedExecutor
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+    
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
