@@ -12,7 +12,7 @@ class webcamNode(Node):
     def __init__(self):
         super().__init__('webcam_node')
         self.image_mode = True  # Set to True to use a static image for detection
-        self.image_path = '/root/meal-plan/food2.jpg'  # Path to the static image
+        self.image_path = '/root/meal-plan/src/my_package/images/food2.jpg'  # Path to the static image
         # --- Parameters ---
         self.confidence_threshold = 0.5
         self.min_pixel_size = 30
