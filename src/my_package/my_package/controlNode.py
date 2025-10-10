@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+#transiution to services for motion control services as goal progress and results is more suitable for 
 import rclpy
 from rclpy.node import Node
 from my_package.srv import DetectIngredients, GenerateRecipe, MoveToPosition, ExecuteGrip, SetTool

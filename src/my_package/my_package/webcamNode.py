@@ -11,7 +11,8 @@ import json
 class webcamNode(Node):
     def __init__(self):
         super().__init__('webcam_node')
-        
+        self.image_mode = True  # Set to True to use a static image for detection
+        self.image_path = '/root/meal-plan/food2.jpg'  # Path to the static image
         # --- Parameters ---
         self.confidence_threshold = 0.5
         self.min_pixel_size = 30
@@ -42,7 +43,7 @@ class webcamNode(Node):
         
         # --- Load YOLO model ---
         try:
-            self.model = YOLO('yolov8n.pt')
+            self.model = YOLO('ingredients.pt')
             self.get_logger().info('YOLO model loaded successfully')
         except Exception as e:
             self.get_logger().error(f'Failed to load YOLO model: {e}')
@@ -61,20 +62,30 @@ class webcamNode(Node):
         """Service callback for ingredient detection"""
         detected_data = []
 
-        # If camera or model unavailable → fallback
-        if self.cap is None or not self.cap.isOpened() or self.model is None:
-            self.get_logger().error("Camera or YOLO unavailable — using hardcoded ingredients")
-            self._populate_hardcoded_ingredients(response)
-            self.get_logger().info(f"Service returning ingredients: {[ing.name for ing in response.ingredients]}")
+        if self.image_mode:
+            frame = cv2.imread(self.image_path)
+            if frame is None:
+                raise ValueError(f"Failed to read image from {self.image_path}")
+            self.get_logger().info(f"Loaded image from {self.image_path} for detection.")
+        else:
+            # If camera or model unavailable → fallback
+            if self.cap is None or not self.cap.isOpened() or self.model is None:
+                self.get_logger().error("Camera or YOLO unavailable — using hardcoded ingredients")
+                self._populate_hardcoded_ingredients(response)
+                self.get_logger().info(f"Service returning ingredients: {[ing.name for ing in response.ingredients]}")
 
-            return response
+                return response
         
         # Capture image
-        ret, frame = self.cap.read()
-        if not ret:
-            self.get_logger().error("Failed to capture frame — using hardcoded ingredients")
-            self._populate_hardcoded_ingredients(response)
-            return response
+            ret, frame = self.cap.read()
+            if not ret:
+                self.get_logger().error("Failed to capture frame — using hardcoded ingredients")
+                self._populate_hardcoded_ingredients(response)
+                return response
+
+
+    
+        
 
         # Run YOLO inference
         results = self.model(frame, imgsz=self.image_width, verbose=False)
@@ -102,23 +113,25 @@ class webcamNode(Node):
 
                 # Build Ingredients message
                 ingredient_msg = Ingredients()
-                ingredient_msg.name = label
-                ingredient_msg.x_center = center_x
-                ingredient_msg.y_center = center_y
+                ingredient_msg.name = str(label)
+                ingredient_msg.x_center = float(center_x)
+                ingredient_msg.y_center = float(center_y)
                 ingredient_msg.x_grid = 0.0
                 ingredient_msg.y_grid = 0.0
                 ingredient_msg.z_grid = 0.0
-                ingredient_msg.distance = distance
+                ingredient_msg.distance = float(distance)
+
 
                 response.ingredients.append(ingredient_msg)
 
                 detected_data.append({
-                    'name': label,
-                    'confidence': confidence,
-                    'center_x': center_x,
-                    'center_y': center_y,
-                    'distance': distance
+                    'name': str(label),
+                    'confidence': float(confidence),
+                    'center_x': float(center_x),
+                    'center_y': float(center_y),
+                    'distance': float(distance)
                 })
+
 
                 self._draw_detection(
                     frame, label, confidence, distance, 
@@ -138,7 +151,7 @@ class webcamNode(Node):
 
         # Optional: show result briefly
         cv2.imshow('Ingredient Detection', frame)
-        cv2.waitKey(500)
+        cv2.waitKey(3000)
         cv2.destroyAllWindows()
 
         return response
