@@ -1,5 +1,3 @@
-# launch/autocook_system.launch.py
-
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
@@ -37,13 +35,20 @@ def generate_launch_description():
             parameters=[{'robot_description': robot_description}],
         ),
 
-        # Webcam detection service
+        # Webcam detection service with ultrasonic sensor
         Node(
             package='my_package',
             executable='webcamNode.py',
             name='webcam_node',
             output='screen',
-            parameters=[{'use_sim_time': False}]
+            parameters=[
+                {'use_sim_time': False},
+                {'image_mode': False},  # Set to True for static image testing
+                {'image_path': '/root/meal-plan/src/my_package/images/food2.jpg'},
+                {'use_ultrasonic': True},  # Enable ultrasonic sensor
+                {'ultrasonic_trigger_pin': 23},  # GPIO pin for trigger
+                {'ultrasonic_echo_pin': 24}  # GPIO pin for echo
+            ]
         ),
 
         # Recipe planning service

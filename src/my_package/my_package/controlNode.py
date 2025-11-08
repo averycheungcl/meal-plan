@@ -335,21 +335,38 @@ class controlNode(Node):
             return False
 
     def execute_grip(self, action):
-        """Execute gripper action using grip service"""
-        try:
-            if not self.grip_client.wait_for_service(timeout_sec=1.0):
-                self.get_logger().warn('Grip service not ready, skipping')
-                return True
-            
-            request = ExecuteGrip.Request()
-            request.action = action
+        """Execute gripper action with retry logic"""
+        max_attempts = 5
+        
+        for attempt in range(max_attempts):
+            try:
+                if not self.grip_client.wait_for_service(timeout_sec=1.0):
+                    self.get_logger().log('Grip service not ready, skipping')
+                    return True  # Don't block workflow in simulation
+                
+                request = ExecuteGrip.Request()
+                request.action = action
+                
+                self.get_logger().info(f'Gripper {action} (attempt {attempt + 1}/{max_attempts})')
+                
+                result = self.call_service_async(self.grip_client, request, timeout_sec=10.0)
+                
+                if result and result.success:
+                    self.get_logger().info(f'✓ Gripper {action} successful')
+                    return True
+                
+                if attempt < max_attempts - 1:
+                    self.get_logger().log(f'Gripper {action} failed, retrying...')
+                    time.sleep(0.5)
+                
+            except Exception as e:
+                self.get_logger().error(f'Grip service call failed: {e}')
+                if attempt < max_attempts - 1:
+                    time.sleep(0.5)
+        
+        self.get_logger().error(f'Gripper {action} failed after {max_attempts} attempts')
+        return False
 
-            result = self.call_service_async(self.grip_client, request, timeout_sec=10.0)
-            return result.success if result else False
-
-        except Exception as e:
-            self.get_logger().error(f'Grip service call failed: {e}')
-            return False
 
     def set_tool(self, tool_name):
         """Set/change tool using tool service"""

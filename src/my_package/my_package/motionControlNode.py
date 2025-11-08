@@ -65,21 +65,32 @@ class motionControlNode(Node):
         self.get_logger().info('Motion control node initialized and ready')
 
     def connect_esp32(self):
-        """Connect to ESP32 with error handling"""
-        try:
-            self.esp32_serial = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-            time.sleep(2)
-            self.get_logger().info('ESP32 serial connection established')
-        except serial.SerialException as e:
-            self.get_logger().error(f'Failed to connect to ESP32 on /dev/ttyUSB0: {e}')
+        """Connect to ESP32 using UART (hardware serial) with retry and auto-detect"""
+        uart_ports = [
+            '/dev/ttyS0',      # Standard UART on many SBCs
+            '/dev/ttyAMA0',    # Raspberry Pi primary UAR
+            '/dev/serial0'     # Default serial alias on Raspberry Pi
+        ]
+
+        for port in uart_ports:
             try:
-                # Try alternative port
-                self.esp32_serial = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+                self.get_logger().info(f'Attempting UART connection on {port}...')
+                self.esp32_serial = serial.Serial(
+                    port=port,
+                    baudrate=115200,
+                    timeout=1
+                )
                 time.sleep(2)
-                self.get_logger().info('ESP32 connected on /dev/ttyACM0')
-            except:
-                self.get_logger().error('Failed to connect to ESP32 on any port')
-                self.esp32_serial = None
+                if self.esp32_serial.is_open:
+                    self.get_logger().info(f' UART connection established on {port}')
+                    return
+            except serial.SerialException as e:
+                self.get_logger().warn(f'UART port {port} failed: {e}')
+                continue
+
+        self.get_logger().error(' Failed to connect to ESP32 via UART on any known port')
+        self.esp32_serial = None
+
 
     def setup_moveit2(self):
         """Initialize MoveIt2 components for ROS2 Rolling"""
@@ -346,36 +357,58 @@ class motionControlNode(Node):
         self.get_logger().error(f'ESP32 communication failed after {self.esp32_max_retries} attempts')
         return False
     def execute_gripper_action(self, action):
-        """Execute gripper open/close"""
+        """Execute gripper open/close with improved error handling"""
         if not self.esp32_serial:
             self.get_logger().warn('ESP32 not connected, simulating gripper action')
             return True
         
-        try:
-            command = {
-                'action': 'gripper',
-                'state': action,  # 'open' or 'close'
-                'timestamp': time.time()
-            }
-            
-            json_command = json.dumps(command) + '\n'
-            self.esp32_serial.write(json_command.encode())
-            self.esp32_serial.flush()
-            
-            # Wait for acknowledgment
-            self.esp32_serial.timeout = 2.0
-            response = self.esp32_serial.readline().decode().strip()
-            
-            if response == "OK":
-                self.get_logger().info(f'Gripper {action} completed')
-                return True
-            else:
-                self.get_logger().warn(f'Gripper {action} failed: {response}')
-                return False
+        max_retries = 2
+        
+        for attempt in range(max_retries):
+            try:
+                command = {
+                    'action': 'gripper',
+                    'state': action,
+                    'timestamp': time.time()
+                }
                 
-        except Exception as e:
-            self.get_logger().error(f'Gripper command failed: {e}')
-            return False
+                json_command = json.dumps(command) + '\n'
+                self.esp32_serial.write(json_command.encode())
+                self.esp32_serial.flush()
+                
+                self.get_logger().debug(f'Sent gripper command: {action}')
+                
+                # Wait for acknowledgment with timeout
+                self.esp32_serial.timeout = 2.0
+                response = self.esp32_serial.readline().decode().strip()
+                
+                if response == "OK":
+                    self.get_logger().info(f'✓ Gripper {action} completed')
+                    return True
+                else:
+                    self.get_logger().log(
+                        f'Gripper unexpected response (attempt {attempt + 1}): {response}'
+                    )
+                    
+                    if attempt < max_retries - 1:
+                        time.sleep(0.3)
+                        continue
+                    
+            except serial.SerialException as e:
+                self.get_logger().error(f'Serial error (attempt {attempt + 1}): {e}')
+                if attempt < max_retries - 1:
+                    time.sleep(0.3)
+                    # Try to reconnect
+                    self.connect_esp32()
+                    continue
+            except Exception as e:
+                self.get_logger().error(f'Gripper command error: {e}')
+                if attempt < max_retries - 1:
+                    time.sleep(0.3)
+                    continue
+        
+        self.get_logger().error(f'Gripper {action} failed after {max_retries} attempts')
+        return False
 
     def pickup_tool(self, tool_name):
         """Navigate to tool location and attach it"""
